@@ -1,0 +1,35 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 5
+    },
+    "auditLog": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\.00389fb28005f75b96061bba6a762294f5f5a3a2-audit.json",
+    "files": [
+        {
+            "date": 1741157552329,
+            "name": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\userActivity-2025-10.log",
+            "hash": "01fa4e92ede61c5a1c0b79951e4d0f4342b62ab4e127fc8367cd8f721b9d00e9"
+        },
+        {
+            "date": 1741588136250,
+            "name": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\userActivity-2025-11.log",
+            "hash": "ae137c252b8d0ca2669c0965a7b6dbb1f438a49ef7c95db26398bab82ef6255a"
+        },
+        {
+            "date": 1742187873605,
+            "name": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\userActivity-2025-12.log",
+            "hash": "1e65a303ddf13d71ef218d2ca26b40bb126538d400f617ed77831155a9c0c0f6"
+        },
+        {
+            "date": 1742795158201,
+            "name": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\userActivity-2025-13.log",
+            "hash": "e386f855517b8123087a626fb9af2ec92dbb37d5e1d471d3b814583aaf033f3a"
+        },
+        {
+            "date": 1743338607454,
+            "name": "D:\\Firecast v1\\Server\\config\\userActivityLogs\\userActivity-2025-14.log",
+            "hash": "e4650401ad70735c2669b1cf146f6e3a49f673421a1462598504f66085297411"
+        }
+    ],
+    "hashType": "sha256"
+}

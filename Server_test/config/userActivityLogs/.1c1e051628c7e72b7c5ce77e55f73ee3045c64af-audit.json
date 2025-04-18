@@ -1,0 +1,30 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 5
+    },
+    "auditLog": "D:\\9A Ticker Rotator\\ticker\\server\\config\\userActivityLogs\\.1c1e051628c7e72b7c5ce77e55f73ee3045c64af-audit.json",
+    "files": [
+        {
+            "date": 1733983846538,
+            "name": "D:\\9A Ticker Rotator\\ticker\\server\\config\\userActivityLogs\\userActivity-2024-50.log",
+            "hash": "f03e4e5d943cd694a9062f386ae36b458b1e52c09e567c3cdd8d3dc248daeb07"
+        },
+        {
+            "date": 1736421089019,
+            "name": "D:\\9A Ticker Rotator\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-02.log",
+            "hash": "ce60006b6203040dd67dff22c3d2cf93fb148453347354dcb98b36707f2bf62a"
+        },
+        {
+            "date": 1737967138562,
+            "name": "D:\\9A Ticker Rotator\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-05.log",
+            "hash": "13379279b242922724c6f30d1c7468c644de081ad78e14678bb41ed3237c0aa8"
+        },
+        {
+            "date": 1738754729166,
+            "name": "D:\\9A Ticker Rotator\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-06.log",
+            "hash": "9acd92f5738c1e0cfec96b10a8106e5509ca84c3869567d38917a5b29c349aef"
+        }
+    ],
+    "hashType": "sha256"
+}

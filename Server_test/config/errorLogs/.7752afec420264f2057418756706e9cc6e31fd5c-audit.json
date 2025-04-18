@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 5
+    },
+    "auditLog": "D:\\9A Ticker Rotator\\ticker\\server\\config\\errorLogs\\.7752afec420264f2057418756706e9cc6e31fd5c-audit.json",
+    "files": [
+        {
+            "date": 1733984323606,
+            "name": "D:\\9A Ticker Rotator\\ticker\\server\\config\\errorLogs\\error-2024-50.log",
+            "hash": "c86397c0cfabc990d9e47f75403b8c2be44182694ae61567c47cb78730b13f8f"
+        }
+    ],
+    "hashType": "sha256"
+}

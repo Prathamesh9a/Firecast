@@ -1,0 +1,59 @@
+.news-ticker-container {
+  width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  position: relative;
+}
+
+.news-ticker {
+  display: inline-block;
+  animation: marquee 500s linear infinite; /* Much slower speed */
+}
+
+.news-ticker:hover {
+  animation-play-state: paused; /* Pause on hover */
+}
+
+/* Make sure you have the keyframes defined */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%); /* This makes it move half the width */
+  }
+}
+
+  /* PDF and Document Viewer Containers */
+.pdf-container, .office-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: white;
+}
+
+.pdf-iframe, .office-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* Ensure the media preview container fills the screen */
+.media-preview {
+  width: 100vw;
+  height: 100vh;
+  position: relative;
+}
+
+.document-viewer {
+  width: 100%;
+  height: 100%;
+}
+
+.rpv-core__viewer {
+  width: 100%;
+  height: 100%;
+}
+

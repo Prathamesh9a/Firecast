@@ -1,0 +1,41 @@
+{
+  "name": "services",
+  "version": "1.0.0",
+  "main": "index.js",
+  "bin": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon app.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.8.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "jszip": "^3.10.1",
+    "libreoffice-convert": "^1.6.1",
+    "node-fetch": "^3.3.2",
+    "nodemon": "^3.1.7",
+    "office-to-pdf": "^4.0.0",
+    "officegen": "^0.6.5",
+    "pdf-lib": "^1.17.1",
+    "pptx2pdf": "^1.0.10",
+    "sequelize": "^6.37.4",
+    "sqlite3": "^5.1.7",
+    "winston": "^3.17.0",
+    "winston-daily-rotate-file": "^5.0.0",
+    "xml2js": "^0.6.2"
+  },
+  "pkg": {
+    "assets": [
+      "node_modules/sqlite3/build/Release/node_sqlite3.node",
+      "models/**/*.js",
+      "config/**/*.js",
+      "ticker_db.sqlite"
+    ]
+  }
+}

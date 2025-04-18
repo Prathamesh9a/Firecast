@@ -1,0 +1,35 @@
+{
+    "keep": {
+        "days": false,
+        "amount": 5
+    },
+    "auditLog": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\.28b445863a0fe83e0fdb0321313f957866837e1e-audit.json",
+    "files": [
+        {
+            "date": 1738823531432,
+            "name": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-06.log",
+            "hash": "d051fb7b74bacd6402f30fdf064b8dcf60bf0a122d83dd32be53cadc21a89039"
+        },
+        {
+            "date": 1739104969850,
+            "name": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-07.log",
+            "hash": "8f5a39ba98948621564d7f2d4ee1bd3fc70c9113a847d1f0f5edad636270dd0c"
+        },
+        {
+            "date": 1739713161917,
+            "name": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-08.log",
+            "hash": "a1510b4ed6514aa7216d165156afff1345de38a0448f4018242a26e0769a4992"
+        },
+        {
+            "date": 1740714941034,
+            "name": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-09.log",
+            "hash": "f3743d13b2413c0d85d7f764656724b78a5773a613aca8bc0c6b3a719e79202f"
+        },
+        {
+            "date": 1740913545877,
+            "name": "D:\\ticker_final\\ticker\\server\\config\\userActivityLogs\\userActivity-2025-10.log",
+            "hash": "fbfe09f4c657de03de1e3b3c9e5f8cce0314d8cbbe23c6005ae51caf0042bcde"
+        }
+    ],
+    "hashType": "sha256"
+}

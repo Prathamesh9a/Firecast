@@ -1,0 +1,46 @@
+/* styles.css */
+
+
+  
+
+  .loader {
+    border: 6px solid rgba(255, 255, 255, 0.2); /* Light gray border */
+    border-top: 6px solid #FF9F00; /* Bright orange border */
+    border-right: 6px solid #FF3E00; /* Bright red accent */
+    border-radius: 50%; /* Circular spinner */
+    width: 64px;
+    height: 64px;
+    animation: spin 1s linear infinite;
+    box-shadow: 0 0 10px rgba(255, 159, 0, 0.6); /* Subtle glowing effect */
+  }
+
+  
+  
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .text-loading {
+    font-family: 'Outfit', sans-serif;
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: #fff;
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.8); /* Subtle glow */
+    animation: pulse 1.5s infinite; /* Pulsing effect */
+  }
+  
+  @keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+  
+  
