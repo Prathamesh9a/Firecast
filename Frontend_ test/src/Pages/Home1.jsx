@@ -18,7 +18,7 @@ import ContentScheduler from './ContentScheduler';
 import './styles.css';
 import Swal from 'sweetalert2';
 import 'react-toastify/dist/ReactToastify.css';
-import { v4 as uuidv4 } from 'uuid'; // For unique group IDs
+import { v4 as uuidv4 } from 'uuid';
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -36,25 +36,25 @@ const Home1 = () => {
     {
       id: uuidv4(),
       layout: 'single',
+      time: 60,
+      schedule: {
+        startTime: '',
+        endTime: '',
+        startDate: '',
+        endDate: '',
+        frequency: 'none',
+        repeatInterval: 1,
+        repeatUntil: '',
+        weeklyDays: [],
+        monthlyRule: '',
+        displayMode: 'exclusive',
+        priority: 'medium',
+        timeWindows: [{ startTime: '', endTime: '' }]
+      },
       items: [{
         link: '',
-        time: 60,
         file: null,
         analyzeWithAI: false,
-        schedule: {
-          startTime: '',
-          endTime: '',
-          startDate: '',
-          endDate: '',
-          frequency: 'none',
-          repeatInterval: 1,
-          repeatUntil: '',
-          weeklyDays: [],
-          monthlyRule: '',
-          displayMode: 'exclusive',
-          priority: 'medium',
-          timeWindows: [{ startTime: '', endTime: '' }] // Initialize with one time window
-        },
       }],
     }
   ]);
@@ -67,18 +67,18 @@ const Home1 = () => {
   const [loading, setLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
-  const [schedulerModal, setSchedulerModal] = useState({ open: false, groupId: null, itemIndex: null });
+  const [schedulerModal, setSchedulerModal] = useState({ open: false, groupId: null });
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
   const [currentGroupId, setCurrentGroupId] = useState(null);
 
   const toggleShowPM = () => setShowPM((prev) => !prev);
 
-  const openSchedulerModal = (groupId, itemIndex) => {
-    setSchedulerModal({ open: true, groupId, itemIndex });
+  const openSchedulerModal = (groupId) => {
+    setSchedulerModal({ open: true, groupId });
   };
 
   const closeSchedulerModal = () => {
-    setSchedulerModal({ open: false, groupId: null, itemIndex: null });
+    setSchedulerModal({ open: false, groupId: null });
   };
 
   const toggleAnalyzeWithAI = (groupId, itemIndex) => {
@@ -92,16 +92,14 @@ const Home1 = () => {
     }));
   };
 
-  const updateSchedule = (groupId, itemIndex, field, value) => {
+  const updateSchedule = (groupId, field, value) => {
     setGroups(groups.map(group => {
       if (group.id === groupId) {
-        const newItems = [...group.items];
         if (field === 'timeWindows') {
-          newItems[itemIndex].schedule = { ...newItems[itemIndex].schedule, timeWindows: value };
+          return { ...group, schedule: { ...group.schedule, timeWindows: value } };
         } else {
-          newItems[itemIndex].schedule = { ...newItems[itemIndex].schedule, [field]: value };
+          return { ...group, schedule: { ...group.schedule, [field]: value } };
         }
-        return { ...group, items: newItems };
       }
       return group;
     }));
@@ -138,33 +136,16 @@ const Home1 = () => {
       setGroups(groups.map(group => {
         if (group.id === currentGroupId) {
           let newItems = [...group.items];
-          // Adjust items to match required count
           if (newItems.length < requiredItems) {
-            // Add new items
             const newItemTemplate = {
               link: '',
-              time: 60,
               file: null,
               analyzeWithAI: false,
-              schedule: {
-                startTime: '',
-                endTime: '',
-                startDate: '',
-                endDate: '',
-                frequency: 'none',
-                repeatInterval: 1,
-                repeatUntil: '',
-                weeklyDays: [],
-                monthlyRule: '',
-                displayMode: 'exclusive',
-                priority: 'medium'
-              },
             };
             while (newItems.length < requiredItems) {
               newItems.push({ ...newItemTemplate });
             }
           } else if (newItems.length > requiredItems) {
-            // Remove excess items
             newItems = newItems.slice(0, requiredItems);
           }
           return { ...group, layout: layoutId, items: newItems };
@@ -201,24 +182,25 @@ const Home1 = () => {
     setGroups([...groups, {
       id: uuidv4(),
       layout: 'single',
+      time: 60,
+      schedule: {
+        startTime: '',
+        endTime: '',
+        startDate: '',
+        endDate: '',
+        frequency: 'none',
+        repeatInterval: 1,
+        repeatUntil: '',
+        weeklyDays: [],
+        monthlyRule: '',
+        displayMode: 'exclusive',
+        priority: 'medium',
+        timeWindows: [{ startTime: '', endTime: '' }]
+      },
       items: [{
         link: '',
-        time: 60,
         file: null,
         analyzeWithAI: false,
-        schedule: {
-          startTime: '',
-          endTime: '',
-          startDate: '',
-          endDate: '',
-          frequency: 'none',
-          repeatInterval: 1,
-          repeatUntil: '',
-          weeklyDays: [],
-          monthlyRule: '',
-          displayMode: 'exclusive',
-          priority: 'medium'
-        },
       }],
     }]);
   };
@@ -249,14 +231,16 @@ const Home1 = () => {
     const selectedFiles = Array.from(event.target.files);
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/quicktime",
+      "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
+    
     const allowedExtensions = [
-      "mp4", "webm", "quicktime", "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx"
+      "mp4", "webm", "ogg", "mov", "avi", "mkv", // Video extensions
+      "jpeg", "jpg", "png", "gif", "svg",        // Image extensions
+      "pdf", "ppt", "pptx", "doc", "docx"        // Document extensions
     ];
     const maxFileSize = 524288000;
 
@@ -289,15 +273,13 @@ const Home1 = () => {
           ...newItems[itemIndex],
           link: url,
           file: file,
-          time: 60,
         };
         if (file.type.startsWith("video/")) {
           const video = document.createElement("video");
           video.src = url;
           video.onloadedmetadata = () => {
             const durationInSeconds = Math.floor(video.duration);
-            newItems[itemIndex].time = durationInSeconds;
-            setGroups(groups.map(g => g.id === groupId ? { ...g, items: newItems } : g));
+            setGroups(groups.map(g => g.id === groupId ? { ...g, time: durationInSeconds } : g));
           };
         }
         return { ...group, items: newItems };
@@ -308,12 +290,10 @@ const Home1 = () => {
     event.target.value = null;
   };
 
-  const handleTimeChange = (groupId, itemIndex, value) => {
+  const handleTimeChange = (groupId, value) => {
     setGroups(groups.map(group => {
       if (group.id === groupId) {
-        const newItems = [...group.items];
-        newItems[itemIndex].time = value;
-        return { ...group, items: newItems };
+        return { ...group, time: value };
       }
       return group;
     }));
@@ -325,14 +305,16 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/quicktime",
+      "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
+    
     const allowedExtensions = [
-      "mp4", "webm", "quicktime", "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx"
+      "mp4", "webm", "ogg", "mov", "avi", "mkv", // Video extensions
+      "jpeg", "jpg", "png", "gif", "svg",        // Image extensions
+      "pdf", "ppt", "pptx", "doc", "docx"        // Document extensions
     ];
     const maxFileSize = 524288000;
 
@@ -362,15 +344,13 @@ const Home1 = () => {
           ...newItems[itemIndex],
           link: url,
           file: file,
-          time: 60,
         };
         if (file.type.startsWith("video/")) {
           const video = document.createElement("video");
           video.src = url;
           video.onloadedmetadata = () => {
             const durationInSeconds = Math.floor(video.duration);
-            newItems[itemIndex].time = durationInSeconds;
-            setGroups(groups.map(g => g.id === groupId ? { ...g, items: newItems } : g));
+            setGroups(groups.map(g => g.id === groupId ? { ...g, time: durationInSeconds } : g));
           };
         }
         return { ...group, items: newItems };
@@ -402,6 +382,8 @@ const Home1 = () => {
     const links = groups.flatMap(group => group.items.map(item => ({
       ...item,
       layout: group.layout,
+      time: group.time,
+      schedule: group.schedule,
     })));
 
     for (const [index, linkItem] of links.entries()) {
@@ -447,7 +429,6 @@ const Home1 = () => {
       formData.append(`links[${index}][schedule][monthlyRule]`, linkItem.schedule.monthlyRule);
       formData.append(`links[${index}][schedule][displayMode]`, linkItem.schedule.displayMode);
       formData.append(`links[${index}][schedule][priority]`, linkItem.schedule.priority);
-      // Handle timeWindows array
       if (linkItem.schedule.timeWindows) {
         linkItem.schedule.timeWindows.forEach((tw, twIndex) => {
           formData.append(`links[${index}][schedule][timeWindows][${twIndex}][startTime]`, tw.startTime);
@@ -504,6 +485,7 @@ const Home1 = () => {
       }
     }
   };
+
   const handlePreview = () => {
     if (previewUrl) {
       navigate(`/preview/5`);
@@ -691,8 +673,6 @@ const Home1 = () => {
                         <BiLayout className="mr-1" />
                         <span className="text-sm">{getLayoutName(group.layout)}</span>
                       </button>
-                      {/* {renderLayoutPreview(group.layout, true)} */}
-
                     </div>
                     <div className="flex items-center">
                       <button
@@ -728,6 +708,42 @@ const Home1 = () => {
                           </button>
                         </>
                       )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col md:flex-row items-end gap-3 mb-3">
+                    <div className="items-center">
+                      <p style={{ fontFamily: 'Outfit', fontWeight: '500', color: '#6F7C8E', lineHeight: '17.64px', marginBottom: '7px' }}>Enter Time</p>
+                      <div className='time-input-group' style={{ position: 'relative' }}>
+                        <IoTimeOutline style={{ position: 'absolute', top: '13px', left: '7px', color: '#6F7C8E' }} />
+                        <div style={{ width: '1px', height: '60%', backgroundColor: '#E1E1E1', marginRight: '8px' }}></div>
+                        <input
+                          type="number"
+                          className="w-16 p-2 border border-gray-300 rounded-md text-center"
+                          value={group.time}
+                          onChange={(e) => handleTimeChange(group.id, e.target.value)}
+                          placeholder="Time"
+                          required
+                          style={{ width: '112px', paddingLeft: '28px', paddingRight: '35px' }}
+                        />
+                        <span className="time" style={{ position: 'absolute', top: '0', width: 'auto', right: '0', background: 'black', height: '100%', borderRadius: '0px 5px 5px 0px', textAlign: 'center', lineHeight: '40px', color: 'white', fontSize: '14px', paddingRight: '6px', paddingLeft: '6px' }}>Sec</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => openSchedulerModal(group.id)}
+                        className={`p-2 rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
+                        style={{ width: '80px', height: '45px' }}
+                      >
+                        {group.schedule?.startTime || group.schedule?.startDate ? (
+                          <>
+                            Edit<br />Schedule
+                          </>
+                        ) : (
+                          <>
+                            Add<br />Schedule
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                   {group.items.map((item, itemIndex) => (
@@ -806,42 +822,6 @@ const Home1 = () => {
                               </label>
                             </div>
                           )}
-                        </div>
-                      </div>
-                      <div className="flex flex-col md:flex-row items-end gap-3 ml-4">
-                        <div className="items-center">
-                          <p style={{ fontFamily: 'Outfit', fontWeight: '500', color: '#6F7C8E', lineHeight: '17.64px', marginBottom: '7px' }}>Enter Time</p>
-                          <div className='time-input-group' style={{ position: 'relative' }}>
-                            <IoTimeOutline style={{ position: 'absolute', top: '13px', left: '7px', color: '#6F7C8E' }} />
-                            <div style={{ width: '1px', height: '60%', backgroundColor: '#E1E1E1', marginRight: '8px' }}></div>
-                            <input
-                              type="number"
-                              className="w-16 p-2 border border-gray-300 rounded-md text-center"
-                              value={item.time}
-                              onChange={(e) => handleTimeChange(group.id, itemIndex, e.target.value)}
-                              placeholder="Time"
-                              required
-                              style={{ width: '112px', paddingLeft: '28px', paddingRight: '35px' }}
-                            />
-                            <span className="time" style={{ position: 'absolute', top: '0', width: 'auto', right: '0', background: 'black', height: '100%', borderRadius: '0px 5px 5px 0px', textAlign: 'center', lineHeight: '40px', color: 'white', fontSize: '14px', paddingRight: '6px', paddingLeft: '6px' }}>Sec</span>
-                          </div>
-                        </div>
-                        <div className="flex items-center">
-                          <button
-                            onClick={() => openSchedulerModal(group.id, itemIndex)}
-                            className={`p-2 rounded-lg text-sm text-center leading-tight ${item.schedule?.startTime || item.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
-                            style={{ width: '80px', height: '45px' }}
-                          >
-                            {item.schedule?.startTime || item.schedule?.startDate ? (
-                              <>
-                                Edit<br />Schedule
-                              </>
-                            ) : (
-                              <>
-                                Add<br />Schedule
-                              </>
-                            )}
-                          </button>
                         </div>
                       </div>
                     </div>
@@ -956,11 +936,11 @@ const Home1 = () => {
                       </svg>
                     </button>
                   </div>
-                  {schedulerModal.groupId && schedulerModal.itemIndex !== null && (
+                  {schedulerModal.groupId && (
                     <ContentScheduler
-                      schedule={groups.find(g => g.id === schedulerModal.groupId).items[schedulerModal.itemIndex].schedule}
-                      onChange={(index, field, value) => updateSchedule(schedulerModal.groupId, schedulerModal.itemIndex, field, value)}
-                      index={schedulerModal.itemIndex}
+                      schedule={groups.find(g => g.id === schedulerModal.groupId).schedule}
+                      onChange={(index, field, value) => updateSchedule(schedulerModal.groupId, field, value)}
+                      index={0}
                     />
                   )}
                   <div className="mt-4 flex justify-center">

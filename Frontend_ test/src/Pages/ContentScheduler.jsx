@@ -38,7 +38,7 @@ const TimeWindowInput = ({ timeWindow, onChange, onRemove, showRemoveButton }) =
               showTimeSelectOnly
               timeIntervals={1}
               timeCaption="Time"
-              dateFormat="h:mm aa"
+              dateFormat="HH:mm"
               className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -54,7 +54,7 @@ const TimeWindowInput = ({ timeWindow, onChange, onRemove, showRemoveButton }) =
               showTimeSelectOnly
               timeIntervals={1}
               timeCaption="Time"
-              dateFormat="h:mm aa"
+              dateFormat="HH:mm"
               className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -81,6 +81,16 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
     onChange(index, field, value);
   };
 
+  // Fixed date formatter that prevents timezone issues
+  const formatDate = (date) => {
+    if (!date) return '';
+    // Use local date methods instead of toISOString to avoid timezone shifts
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const handleFrequencyChange = (e) => {
     const frequency = e.target.value;
     const updates = { frequency };
@@ -94,7 +104,7 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
   };
 
   const handleWeeklyDayToggle = (day) => {
-    const currentDays = [...schedule.weeklyDays];
+    const currentDays = [...(schedule.weeklyDays || [])];
     const dayIndex = currentDays.indexOf(day);
     if (dayIndex > -1) {
       currentDays.splice(dayIndex, 1);
@@ -104,7 +114,6 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
     updateSchedule('weeklyDays', currentDays);
   };
 
-  // Handle time windows
   const handleTimeWindowChange = (updatedTimeWindow, timeWindowIndex) => {
     const newTimeWindows = [...(schedule.timeWindows || [{ startTime: '', endTime: '' }])];
     newTimeWindows[timeWindowIndex] = updatedTimeWindow;
@@ -123,13 +132,13 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
     updateSchedule('timeWindows', currentTimeWindows);
   };
 
-  // Ensure timeWindows exists with at least one entry
   const timeWindows = schedule.timeWindows || [{ startTime: schedule.startTime || '', endTime: schedule.endTime || '' }];
 
   return (
     <div className="bg-white p-4 rounded-xl border shadow-sm mt-4">
       <h3 className="text-lg font-medium text-gray-700 mb-4">Content Scheduling</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
         {/* Time Windows */}
         <div className="md:col-span-2">
           <div className="flex justify-between items-center mb-2">
@@ -166,7 +175,7 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
                 <BsCalendar className="absolute top-3 left-3 text-gray-400" />
                 <DatePicker
                   selected={parseDate(schedule.startDate)}
-                  onChange={(date) => updateSchedule('startDate', date ? date.toISOString().split('T')[0] : '')}
+                  onChange={(date) => updateSchedule('startDate', date ? formatDate(date) : '')}
                   dateFormat="yyyy-MM-dd"
                   className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
                   placeholderText="Select date"
@@ -179,7 +188,7 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
                 <BsCalendar className="absolute top-3 left-3 text-gray-400" />
                 <DatePicker
                   selected={parseDate(schedule.endDate)}
-                  onChange={(date) => updateSchedule('endDate', date ? date.toISOString().split('T')[0] : '')}
+                  onChange={(date) => updateSchedule('endDate', date ? formatDate(date) : '')}
                   minDate={parseDate(schedule.startDate)}
                   dateFormat="yyyy-MM-dd"
                   className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -230,7 +239,7 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
                     <BsCalendar className="absolute top-3 left-3 text-gray-400" />
                     <DatePicker
                       selected={parseDate(schedule.repeatUntil)}
-                      onChange={(date) => updateSchedule('repeatUntil', date ? date.toISOString().split('T')[0] : '')}
+                      onChange={(date) => updateSchedule('repeatUntil', date ? formatDate(date) : '')}
                       minDate={parseDate(schedule.startDate) || new Date()}
                       dateFormat="yyyy-MM-dd"
                       className="w-full pl-10 p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -241,6 +250,8 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
               </>
             )}
           </div>
+
+          {/* Weekly Days */}
           {schedule.frequency === 'weekly' && (
             <div className="mt-3">
               <label className="block text-xs text-gray-500 mb-2">Repeat On</label>
@@ -262,6 +273,8 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
               </div>
             </div>
           )}
+
+          {/* Monthly Rule */}
           {schedule.frequency === 'monthly' && (
             <div className="mt-3">
               <label className="block text-xs text-gray-500 mb-2">Monthly Options</label>
@@ -275,16 +288,6 @@ const ContentScheduler = ({ schedule, onChange, index }) => {
                     className="mr-2"
                   />
                   <span className="text-sm text-gray-700">Same day each month</span>
-                </label>
-                <label className="flex items-center">
-                  <input
-                    type="radio"
-                    value="dayOfWeek"
-                    checked={schedule.monthlyRule === 'dayOfWeek'}
-                    onChange={() => updateSchedule('monthlyRule', 'dayOfWeek')}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">Same day of the week each month</span>
                 </label>
               </div>
             </div>
