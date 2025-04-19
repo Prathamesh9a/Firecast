@@ -911,7 +911,7 @@ const EditUrl = () => {
                       exit={{ opacity: 0, y: 10 }}
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
                       className="mb-5 border border-gray-300 rounded-2xl bg-white p-4"
-                      style={{ width: "700px", position: "relative", zIndex: 1 }}
+                      style={{ width: "600px", position: "relative", zIndex: 1 }}
                     >
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center">

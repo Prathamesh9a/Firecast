@@ -24,7 +24,7 @@
   }
 }
 
-  /* PDF and Document Viewer Containers */
+/* PDF and Document Viewer Containers */
 .pdf-container, .office-container {
   position: absolute;
   top: 0;
@@ -40,7 +40,7 @@
   border: none;
 }
 
-/* Ensure the media preview container fills the screen */
+/* Media preview */
 .media-preview {
   width: 100vw;
   height: 100vh;
@@ -56,4 +56,3 @@
   width: 100%;
   height: 100%;
 }
-
