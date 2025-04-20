@@ -24,8 +24,8 @@ const secretUrlKey = '9ATicker'; // Use the same key that was used for encryptio
 
 let userId
 let username
-const baseURL = `http://${ipAddress}:3001`; // Dynamic base URL
-// const baseURL = `http://122.179.140.84:86`; // Dynamic base URL
+// const baseURL = `http://${ipAddress}:3001`; // Dynamic base URL
+const baseURL = `http://122.179.140.84:86`; // Dynamic base URL
 
 function generateRandomCode(length) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
