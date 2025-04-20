@@ -229,23 +229,34 @@ const Home1 = () => {
 
   const handleInputChange = (groupId, itemIndex, event) => {
     const selectedFiles = Array.from(event.target.files);
+    const file = selectedFiles[0];
+    if (!file) {
+      console.log('No file selected'); // CHANGE: Added debug log
+      return;
+    }
+
+    console.log('File:', { // CHANGE: Added debug log for file details
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      extension: file.name.split('.').pop().toLowerCase(),
+    });
+
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
       "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+      "video/mpeg", // CHANGE: Added video/mpeg for broader MP4 support
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
-    
-    const allowedExtensions = [
-      "mp4", "webm", "ogg", "mov", "avi", "mkv", // Video extensions
-      "jpeg", "jpg", "png", "gif", "svg",        // Image extensions
-      "pdf", "ppt", "pptx", "doc", "docx"        // Document extensions
-    ];
-    const maxFileSize = 524288000;
 
-    const file = selectedFiles[0];
-    if (!file) return;
+    const allowedExtensions = [
+      "mp4", "webm", "ogg", "mov", "avi", "mkv",
+      "jpeg", "jpg", "png", "gif", "svg",
+      "pdf", "ppt", "pptx", "doc", "docx",
+    ];
+    const maxFileSize = 524288000; // 500MB
 
     const fileExtension = file.name.split('.').pop().toLowerCase();
     const isValidMime = allowedMimeTypes.includes(file.type);
@@ -253,39 +264,62 @@ const Home1 = () => {
     const isValidSize = file.size <= maxFileSize;
 
     if (!isValidMime) {
-      alert(`❌ Unsupported file type: ${file.type}`);
+      Swal.fire({ // CHANGE: Replaced alert with Swal for better UX
+        title: 'Error',
+        text: `Unsupported file type: ${file.type}`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
     if (!isValidExtension) {
-      alert(`❌ Unsupported file extension: .${fileExtension}`);
+      Swal.fire({
+        title: 'Error',
+        text: `Unsupported file extension: .${fileExtension}`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
     if (!isValidSize) {
-      alert(`❌ File too large: ${file.name}`);
+      Swal.fire({
+        title: 'Error',
+        text: `File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
 
     const url = URL.createObjectURL(file);
-    setGroups(groups.map(group => {
-      if (group.id === groupId) {
-        const newItems = [...group.items];
-        newItems[itemIndex] = {
-          ...newItems[itemIndex],
-          link: url,
-          file: file,
-        };
-        if (file.type.startsWith("video/")) {
-          const video = document.createElement("video");
-          video.src = url;
-          video.onloadedmetadata = () => {
-            const durationInSeconds = Math.floor(video.duration);
-            setGroups(groups.map(g => g.id === groupId ? { ...g, time: durationInSeconds } : g));
+    setGroups(prevGroups => { // CHANGE: Used functional update for state
+      const updatedGroups = prevGroups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          newItems[itemIndex] = {
+            ...newItems[itemIndex],
+            link: url,
+            file: file,
           };
+          if (file.type.startsWith("video/")) {
+            const video = document.createElement("video");
+            video.src = url;
+            video.onloadedmetadata = () => {
+              const durationInSeconds = Math.floor(video.duration);
+              setGroups(groups =>
+                groups.map(g =>
+                  g.id === groupId ? { ...g, time: durationInSeconds } : g
+                )
+              );
+            };
+          }
+          return { ...group, items: newItems };
         }
-        return { ...group, items: newItems };
-      }
-      return group;
-    }));
+        return group;
+      });
+      console.log('Updated groups:', updatedGroups); // CHANGE: Added debug log for state
+      return updatedGroups;
+    });
 
     event.target.value = null;
   };
@@ -301,20 +335,31 @@ const Home1 = () => {
 
   const handleFileDrop = (groupId, itemIndex, droppedFiles) => {
     const file = droppedFiles[0];
-    if (!file) return;
+    if (!file) {
+      console.log('No file dropped'); // CHANGE: Added debug log
+      return;
+    }
+
+    console.log('Dropped file:', { // CHANGE: Added debug log for file details
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      extension: file.name.split('.').pop().toLowerCase(),
+    });
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
       "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+      "video/mpeg", // CHANGE: Added video/mpeg
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
-    
+
     const allowedExtensions = [
-      "mp4", "webm", "ogg", "mov", "avi", "mkv", // Video extensions
-      "jpeg", "jpg", "png", "gif", "svg",        // Image extensions
-      "pdf", "ppt", "pptx", "doc", "docx"        // Document extensions
+      "mp4", "webm", "ogg", "mov", "avi", "mkv",
+      "jpeg", "jpg", "png", "gif", "svg",
+      "pdf", "ppt", "pptx", "doc", "docx",
     ];
     const maxFileSize = 524288000;
 
@@ -324,39 +369,62 @@ const Home1 = () => {
     const isValidSize = file.size <= maxFileSize;
 
     if (!isValidMime) {
-      alert(`❌ Unsupported file type: ${file.type}`);
+      Swal.fire({ // CHANGE: Replaced alert with Swal
+        title: 'Error',
+        text: `Unsupported file type: ${file.type}`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
     if (!isValidExtension) {
-      alert(`❌ Unsupported file extension: .${fileExtension}`);
+      Swal.fire({
+        title: 'Error',
+        text: `Unsupported file extension: .${fileExtension}`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
     if (!isValidSize) {
-      alert(`❌ File too large: ${file.name}`);
+      Swal.fire({
+        title: 'Error',
+        text: `File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`,
+        icon: 'error',
+        confirmButtonText: 'OK',
+      });
       return;
     }
 
     const url = URL.createObjectURL(file);
-    setGroups(groups.map(group => {
-      if (group.id === groupId) {
-        const newItems = [...group.items];
-        newItems[itemIndex] = {
-          ...newItems[itemIndex],
-          link: url,
-          file: file,
-        };
-        if (file.type.startsWith("video/")) {
-          const video = document.createElement("video");
-          video.src = url;
-          video.onloadedmetadata = () => {
-            const durationInSeconds = Math.floor(video.duration);
-            setGroups(groups.map(g => g.id === groupId ? { ...g, time: durationInSeconds } : g));
+    setGroups(prevGroups => { // CHANGE: Used functional update
+      const updatedGroups = prevGroups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          newItems[itemIndex] = {
+            ...newItems[itemIndex],
+            link: url,
+            file: file,
           };
+          if (file.type.startsWith("video/")) {
+            const video = document.createElement("video");
+            video.src = url;
+            video.onloadedmetadata = () => {
+              const durationInSeconds = Math.floor(video.duration);
+              setGroups(groups =>
+                groups.map(g =>
+                  g.id === groupId ? { ...g, time: durationInSeconds } : g
+                )
+              );
+            };
+          }
+          return { ...group, items: newItems };
         }
-        return { ...group, items: newItems };
-      }
-      return group;
-    }));
+        return group;
+      });
+      console.log('Updated groups (drop):', updatedGroups); // CHANGE: Added debug log
+      return updatedGroups;
+    });
   };
 
   const handleCreateUrl = async () => {
@@ -388,24 +456,40 @@ const Home1 = () => {
 
     for (const [index, linkItem] of links.entries()) {
       if (!linkItem.link && !linkItem.file) {
-        alert(`Please fill all the details for item ${index + 1}.`);
+        Swal.fire({ // CHANGE: Replaced alert with Swal
+          title: 'Error',
+          text: `Please fill all the details for item ${index + 1}.`,
+          icon: 'error',
+          confirmButtonText: 'OK',
+        });
         return;
       }
 
       if (linkItem.file) {
         const allowedTypes = [
           "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-          "video/mp4", "video/webm", "video/quicktime",
+          "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+          "video/mpeg", // CHANGE: Added video/mpeg
           "application/pdf", "application/vnd.ms-powerpoint",
           "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         ];
         if (!allowedTypes.includes(linkItem.file.type)) {
-          alert(`Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, MOV, PDF, PPT, PPTX, DOC, DOCX.`);
+          Swal.fire({ // CHANGE: Replaced alert with Swal
+            title: 'Error',
+            text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, OGG, MOV, AVI, MKV, MPEG, PDF, PPT, PPTX, DOC, DOCX.`,
+            icon: 'error',
+            confirmButtonText: 'OK',
+          });
           return;
         }
         if (linkItem.file.size > 524288000) {
-          alert(`File size exceeds the limit of 500MB: ${linkItem.file.name}. Please upload a smaller file.`);
+          Swal.fire({ // CHANGE: Replaced alert with Swal
+            title: 'Error',
+            text: `File size exceeds the limit of 500MB: ${linkItem.file.name}. Please upload a smaller file.`,
+            icon: 'error',
+            confirmButtonText: 'OK',
+          });
           return;
         }
       }
@@ -440,6 +524,8 @@ const Home1 = () => {
         formData.append(`links[${index}][fileName]`, linkItem.file.name);
       }
     });
+
+    console.log('FormData:', Array.from(formData.entries())); // CHANGE: Added debug log for FormData
 
     setLoading(true);
 
@@ -777,7 +863,7 @@ const Home1 = () => {
                           <input
                             type="file"
                             className="hidden"
-                            accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            accept="image/jpeg,image/jpg,image/png,image/gif,image/svg+xml,video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/x-matroska,video/mpeg,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" // CHANGE: Aligned accept with allowedMimeTypes
                             onChange={(e) => handleInputChange(group.id, itemIndex, e)}
                             id={`file-input-${group.id}-${itemIndex}`}
                           />
@@ -854,36 +940,39 @@ const Home1 = () => {
                         <div key={group.id} className="border p-3 rounded-md">
                           <p className="text-sm font-medium mb-2">{getLayoutName(group.layout)}</p>
                           <div className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} gap-2`}>
-                            {group.items.map((item, itemIndex) => (
-                              <div key={itemIndex} className="border p-2 rounded-md">
-                                {item.file ? (
-                                  item.file.type.startsWith("image/") ? (
-                                    <img
-                                      src={URL.createObjectURL(item.file)}
-                                      alt="Preview"
-                                      className="w-full h-auto rounded-md"
-                                    />
-                                  ) : item.file.type.startsWith("video/") ? (
-                                    <video
-                                      src={URL.createObjectURL(item.file)}
-                                      controls
-                                      className="w-full h-auto rounded-md"
-                                    />
+                            {group.items.map((item, itemIndex) => {
+                              console.log('Preview item:', item); // CHANGE: Added debug log for preview items
+                              return (
+                                <div key={itemIndex} className="border p-2 rounded-md">
+                                  {item.file ? (
+                                    item.file.type.startsWith("image/") ? (
+                                      <img
+                                        src={URL.createObjectURL(item.file)}
+                                        alt="Preview"
+                                        className="w-full h-auto rounded-md"
+                                      />
+                                    ) : item.file.type.startsWith("video/") ? (
+                                      <video
+                                        src={URL.createObjectURL(item.file)}
+                                        controls
+                                        className="w-full h-auto rounded-md"
+                                      />
+                                    ) : (
+                                      <p className="text-sm text-gray-700">Unsupported file type</p>
+                                    )
                                   ) : (
-                                    <p className="text-sm text-gray-700">Unsupported file type</p>
-                                  )
-                                ) : (
-                                  <a
-                                    href={item.link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-blue-500 underline text-sm"
-                                  >
-                                    {item.link}
-                                  </a>
-                                )}
-                              </div>
-                            ))}
+                                    <a
+                                      href={item.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 underline text-sm"
+                                    >
+                                      {item.link}
+                                    </a>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
                       ))}
