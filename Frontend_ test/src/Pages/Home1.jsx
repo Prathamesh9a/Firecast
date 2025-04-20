@@ -251,6 +251,7 @@ const Home1 = () => {
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ];
 
+
     const allowedExtensions = [
       "mp4", "webm", "ogg", "mov", "avi", "mkv",
       "jpeg", "jpg", "png", "gif", "svg",
@@ -749,7 +750,8 @@ const Home1 = () => {
                   className="mb-5 border border-gray-300 rounded-2xl bg-white p-4"
                   style={{ width: '700px', position: 'relative', zIndex: 1 }}
                 >
-                  <div className="flex items-center justify-between mb-4">
+
+                  <div className="flex flex-wrap items-end justify-between mb-4 gap-4">
                     <div className="flex items-center">
                       <button
                         onClick={() => openLayoutModal(group.id)}
@@ -760,15 +762,20 @@ const Home1 = () => {
                         <span className="text-sm">{getLayoutName(group.layout)}</span>
                       </button>
                     </div>
+
+
+
+
                     <div className="flex items-center">
                       <button
                         onClick={addNewGroup}
-                        className="p-2 bg-green-500 text-white rounded-xl mr-2"
+                        className="p-2 bg-green-400 text-white rounded-xl mr-2"
                         style={{ width: '75px', height: '40px', fontSize: '18px', display: 'flex', justifyContent: 'center', backgroundColor: '#348824' }}
                       >
                         <FiPlusCircle style={{ width: '16px', height: '16px', marginRight: '5px', marginTop: '4px' }} />
                         Add
                       </button>
+
                       {groups.length > 1 && (
                         <>
                           <button
@@ -795,122 +802,139 @@ const Home1 = () => {
                         </>
                       )}
                     </div>
+
+
                   </div>
-                  <div className="flex flex-col md:flex-row items-end gap-3 mb-3">
-                    <div className="items-center">
-                      <p style={{ fontFamily: 'Outfit', fontWeight: '500', color: '#6F7C8E', lineHeight: '17.64px', marginBottom: '7px' }}>Enter Time</p>
-                      <div className='time-input-group' style={{ position: 'relative' }}>
-                        <IoTimeOutline style={{ position: 'absolute', top: '13px', left: '7px', color: '#6F7C8E' }} />
-                        <div style={{ width: '1px', height: '60%', backgroundColor: '#E1E1E1', marginRight: '8px' }}></div>
-                        <input
-                          type="number"
-                          className="w-16 p-2 border border-gray-300 rounded-md text-center"
-                          value={group.time}
-                          onChange={(e) => handleTimeChange(group.id, e.target.value)}
-                          placeholder="Time"
-                          required
-                          style={{ width: '112px', paddingLeft: '28px', paddingRight: '35px' }}
-                        />
-                        <span className="time" style={{ position: 'absolute', top: '0', width: 'auto', right: '0', background: 'black', height: '100%', borderRadius: '0px 5px 5px 0px', textAlign: 'center', lineHeight: '40px', color: 'white', fontSize: '14px', paddingRight: '6px', paddingLeft: '6px' }}>Sec</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center">
-                      <button
-                        onClick={() => openSchedulerModal(group.id)}
-                        className={`p-2 rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
-                        style={{ width: '80px', height: '45px' }}
-                      >
-                        {group.schedule?.startTime || group.schedule?.startDate ? (
-                          <>
-                            Edit<br />Schedule
-                          </>
-                        ) : (
-                          <>
-                            Add<br />Schedule
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
+
                   {group.items.map((item, itemIndex) => (
                     <div
                       key={itemIndex}
                       className="flex items-center mb-3"
                       style={{ borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none', paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0' }}
                     >
-                      <div className="flex-grow">
-                        <div
-                          className="relative flex items-center border-gray-300 rounded-md"
-                          style={{ width: "440px", paddingRight: '0px' }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            const droppedFiles = Array.from(e.dataTransfer.files);
-                            handleFileDrop(group.id, itemIndex, droppedFiles);
-                          }}
-                        >
-                          <button
-                            type="button"
-                            className="h-16 px-4 text-white rounded-l-lg flex items-center justify-center hover:bg-blue-700"
-                            onClick={() => document.getElementById(`file-input-${group.id}-${itemIndex}`).click()}
-                            style={{ height: '66px', backgroundColor: '#363736' }}
+                      <div
+                        key={itemIndex}
+                        className="flex items-center mb-3 gap-3"
+                        style={{
+                          borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none',
+                          paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0',
+                        }}
+                      >
+                        {/* 📁 Upload Area */}
+                        <div className="flex-grow">
+                          <div
+                            className="relative flex items-center border-gray-300 rounded-md"
+                            style={{ width: "440px", paddingRight: '0px' }}
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const droppedFiles = Array.from(e.dataTransfer.files);
+                              handleFileDrop(group.id, itemIndex, droppedFiles);
+                            }}
                           >
-                            <FaFileArrowUp className="text-lg" style={{ paddingLeft: '6px' }} />
-                            <p style={{ fontFamily: 'Outfit', paddingLeft: '6px', paddingRight: '6px' }}>Upload</p>
+                            <button
+                              type="button"
+                              className="h-16 px-4 text-white rounded-l-lg flex items-center justify-center hover:bg-blue-700"
+                              onClick={() => document.getElementById(`file-input-${group.id}-${itemIndex}`).click()}
+                              style={{ height: '66px', backgroundColor: '#2d3748' }}
+                            >
+                              <FaFileArrowUp className="text-lg" style={{ paddingLeft: '6px' }} />
+                              <p style={{ fontFamily: 'Outfit', paddingLeft: '6px', paddingRight: '6px' }}>Upload</p>
+                            </button>
+                            <input
+                              type="file"
+                              className="hidden"
+                              onChange={(e) => handleInputChange(group.id, itemIndex, e)}
+                              id={`file-input-${group.id}-${itemIndex}`}
+                              accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            />
+                            <input
+                              type="text"
+                              className="w-full p-3 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
+                              style={{
+                                height: '66px',
+                                width: '70%',
+                                backgroundColor: '#F7F7FF',
+                                paddingLeft: '12px',
+                                fontFamily: 'Outfit',
+                                color: item.file ? 'green' : 'black',
+                              }}
+                              placeholder="Embedded Link / Image / Video or Upload File"
+                              value={item.file ? item.file.name : item.link}
+                              onChange={(e) => {
+                                setGroups(groups.map(g => {
+                                  if (g.id === group.id) {
+                                    const newItems = [...g.items];
+                                    newItems[itemIndex].link = e.target.value;
+                                    newItems[itemIndex].file = null;
+                                    return { ...g, items: newItems };
+                                  }
+                                  return g;
+                                }));
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* ⏰ Enter Time */}
+                        <div className="flex flex-col">
+                          <label className="text-xs text-gray-600 font-medium mb-1">Time (sec)</label>
+                          <div className="relative">
+                            <IoTimeOutline style={{ position: 'absolute', top: '13px', left: '7px', color: '#6F7C8E' }} />
+                            <input
+                              type="number"
+                              value={group.time}
+                              onChange={(e) => handleTimeChange(group.id, e.target.value)}
+                              className="w-[112px] p-2 pl-8 pr-12 border border-gray-300 rounded-md text-center"
+                              placeholder="Time"
+                            />
+                            <span
+                              className="absolute right-1 top-[6px] bg-black text-white text-xs rounded px-1 py-[6px]"
+                            >
+                              Sec
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* 📅 Schedule Button */}
+                        <div className="flex flex-col">
+                          <label className="text-xs text-gray-600 font-medium mb-1">Schedule</label>
+                          <button
+                            onClick={() => openSchedulerModal(group.id)}
+                            className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
+                            style={{ width: '80px', height: '45px' }}
+                          >
+                            {group.schedule?.startTime || group.schedule?.startDate ? (
+                              <>
+                                Edit<br />Schedule
+                              </>
+                            ) : (
+                              <>
+                                Add<br />Schedule
+                              </>
+                            )}
                           </button>
-                          <input
-                            type="file"
-                            className="hidden"
-                            accept="image/jpeg,image/jpg,image/png,image/gif,image/svg+xml,video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/x-matroska,video/mpeg,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" // CHANGE: Aligned accept with allowedMimeTypes
-                            onChange={(e) => handleInputChange(group.id, itemIndex, e)}
-                            id={`file-input-${group.id}-${itemIndex}`}
-                          />
-                          <input
-                            type="text"
-                            className="w-full p-3 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
-                            style={{
-                              height: '66px',
-                              width: '70%',
-                              backgroundColor: '#F7F7FF',
-                              paddingLeft: '12px',
-                              fontFamily: 'Outfit',
-                              color: item.file ? 'green' : 'black'
-                            }}
-                            placeholder="Embedded Link / Image / Video or Upload File"
-                            value={item.file ? item.file.name : item.link}
-                            onChange={(e) => {
-                              setGroups(groups.map(g => {
-                                if (g.id === group.id) {
-                                  const newItems = [...g.items];
-                                  newItems[itemIndex].link = e.target.value;
-                                  newItems[itemIndex].file = null;
-                                  return { ...g, items: newItems };
-                                }
-                                return g;
-                              }));
-                            }}
-                          />
-                          {item.file?.type === 'application/pdf' && (
-                            <div className="flex justify-center mt-2">
-                              <label className="flex flex-col items-center cursor-pointer text-center">
-                                <input
-                                  type="checkbox"
-                                  className="sr-only peer"
-                                  checked={item.analyzeWithAI}
-                                  onChange={() => toggleAnalyzeWithAI(group.id, itemIndex)}
-                                />
-                                <div className="relative w-11 h-6 bg-gray-200 rounded-full peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                <span className="mt-2 text-sm font-medium text-gray-700 leading-tight">
-                                  Summarize<br />with AI
-                                </span>
-                              </label>
-                            </div>
-                          )}
                         </div>
                       </div>
+
+                      {item.file?.type === 'application/pdf' && (
+                        <div className="flex justify-center mt-2">
+                          <label className="flex flex-col items-center cursor-pointer text-center">
+                            <input
+                              type="checkbox"
+                              className="sr-only peer"
+                              checked={item.analyzeWithAI}
+                              onChange={() => toggleAnalyzeWithAI(group.id, itemIndex)}
+                            />
+                            <div className="relative w-11 h-6 bg-gray-200 rounded-full peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <span className="mt-2 text-sm font-medium text-gray-700 leading-tight">
+                              Summarize<br />with AI
+                            </span>
+                          </label>
+                        </div>
+                      )}
                     </div>
+
                   ))}
                 </div>
               ))}
@@ -918,7 +942,7 @@ const Home1 = () => {
             <div>
               <button
                 className="w-full py-3 text-white font-semibold rounded-lg"
-                style={{ width: '168px', height: '48px', backgroundColor: '#363736', marginTop: '20px', marginBottom: '60px', position: 'relative', zIndex: 1 }}
+                style={{ width: '168px', height: '48px', backgroundColor: '  #2d3748', marginTop: '20px', marginBottom: '60px', position: 'relative', zIndex: 1 }}
                 onClick={openPreviewModal}
               >
                 Create Screen
@@ -1083,8 +1107,8 @@ const Home1 = () => {
             }}
           />
           <div ref={bottomRef} style={{ paddingBottom: '10px' }}></div>
-        </div>
-      </div>
+        </div >
+      </div >
     </>
   );
 };
