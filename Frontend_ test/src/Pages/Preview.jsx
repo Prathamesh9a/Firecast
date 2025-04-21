@@ -46,7 +46,12 @@ const cache = {
 };
 
 // Fallback UI with blank screen and centered text
-const renderFallbackUI = (message, countdownType, timeRemaining, formatTimeRemaining) => (
+const renderFallbackUI = (
+  message,
+  countdownType,
+  timeRemaining,
+  formatTimeRemaining
+) => (
   <div className="w-full h-full bg-black flex flex-col items-center justify-center">
     <div className="grid grid-cols-1 w-full h-full gap-2 p-2">
       <div className="w-full h-full bg-gray-800 animate-pulse rounded"></div>
@@ -89,6 +94,7 @@ const isYouTubeUrl = (url) => {
   );
 };
 
+// PageRenderer Component
 const PageRenderer = ({ page, pageNum }) => {
   const canvasRef = useRef(null);
 
@@ -129,14 +135,17 @@ const PageRenderer = ({ page, pageNum }) => {
   );
 };
 
-// DocumentContent Component
+// DocumentContent Component with Auto-Scrolling
 const DocumentContent = ({ content, getContentUrl }) => {
   const fileType = content.split(".").pop().toLowerCase();
   const fileUrl = getContentUrl(content);
   const [pages, setPages] = useState([]);
   const containerRef = useRef(null);
-  const { ref, inView } = useInView({ triggerOnce: true });
+  const { ref, inView } = useInView({ triggerOnce: false }); // Track visibility
+  const isScrollingRef = useRef(false);
+  const userInteractionTimeoutRef = useRef(null);
 
+  // Load PDF pages
   useEffect(() => {
     if (fileType === "pdf" && inView) {
       const loadPdf = async () => {
@@ -160,17 +169,83 @@ const DocumentContent = ({ content, getContentUrl }) => {
     }
   }, [fileType, fileUrl, inView]);
 
+  // Auto-scrolling logic for PDF and PPT
+  useEffect(() => {
+    if (
+      (fileType === "pdf" || fileType === "ppt" || fileType === "pptx") &&
+      inView &&
+      containerRef.current
+    ) {
+      const container = containerRef.current;
+
+      // Start auto-scrolling
+      const startScrolling = () => {
+        if (!isScrollingRef.current) {
+          isScrollingRef.current = true;
+          const scrollInterval = setInterval(() => {
+            if (container.scrollTop + container.clientHeight >= container.scrollHeight) {
+              // Reached the bottom, reset to top
+              container.scrollTo({ top: 0, behavior: "smooth" });
+            } else {
+              // Scroll down slowly
+              container.scrollBy({ top: 1, behavior: "auto" });
+            }
+          }, 50); // ~20px per second for readability
+
+          // Store interval ID for cleanup
+          return () => clearInterval(scrollInterval);
+        }
+      };
+
+      // Pause scrolling on user interaction
+      const handleUserInteraction = () => {
+        isScrollingRef.current = false;
+        clearTimeout(userInteractionTimeoutRef.current);
+        // Resume scrolling after 5 seconds of inactivity
+        userInteractionTimeoutRef.current = setTimeout(() => {
+          if (inView) {
+            startScrolling();
+          }
+        }, 5000);
+      };
+
+      // Event listeners for user interaction
+      container.addEventListener("wheel", handleUserInteraction);
+      container.addEventListener("touchmove", handleUserInteraction);
+
+      // Start scrolling initially
+      const cleanup = startScrolling();
+
+      // Cleanup on unmount or when inView changes
+      return () => {
+        if (cleanup) cleanup();
+        container.removeEventListener("wheel", handleUserInteraction);
+        container.removeEventListener("touchmove", handleUserInteraction);
+        clearTimeout(userInteractionTimeoutRef.current);
+      };
+    }
+  }, [fileType, inView]);
+
   if (fileType === "pdf") {
     return (
-      <div ref={ref} className="w-full h-screen overflow-y-auto scrollbar-hidden" style={{ scrollBehavior: "smooth" }}>
+      <div
+        ref={(node) => {
+          containerRef.current = node;
+          ref(node);
+        }}
+        className="w-full h-screen overflow-y-auto scrollbar-hidden"
+        style={{ scrollBehavior: "smooth" }}
+      >
         {inView ? (
           <div
-            ref={containerRef}
             className="w-full min-h-screen flex flex-col items-center p-4 bg-gray-900"
           >
             {pages.length > 0 ? (
               pages.map((page) => (
-                <div key={`page-container-${page.pageNum}`} className="w-full max-w-[95%] mb-4">
+                <div
+                  key={`page-container-${page.pageNum}`}
+                  className="w-full max-w-[95%] mb-4"
+                >
                   <PageRenderer page={page} pageNum={page.pageNum} />
                 </div>
               ))
@@ -189,9 +264,21 @@ const DocumentContent = ({ content, getContentUrl }) => {
     );
   }
 
-  if (fileType === "ppt" || fileType === "pptx" || fileType === "doc" || fileType === "docx") {
+  if (
+    fileType === "ppt" ||
+    fileType === "pptx" ||
+    fileType === "doc" ||
+    fileType === "docx"
+  ) {
     return (
-      <div ref={ref} className="w-full h-full">
+      <div
+        ref={(node) => {
+          containerRef.current = node;
+          ref(node);
+        }}
+        className="w-full h-full overflow-y-auto scrollbar-hidden"
+        style={{ scrollBehavior: "smooth" }}
+      >
         {inView ? (
           <iframe
             src={getContentUrl(content)}
@@ -213,83 +300,101 @@ const DocumentContent = ({ content, getContentUrl }) => {
   return null;
 };
 
-
 // MediaItem Component
-const MediaItem = React.memo(({ content, index, isPaused, setProgress, getContentUrl, isWebpageUrl, videoRefs }) => {
-  const { ref, inView } = useInView({ triggerOnce: true });
+const MediaItem = React.memo(
+  ({
+    content,
+    index,
+    isPaused,
+    setProgress,
+    getContentUrl,
+    isWebpageUrl,
+    videoRefs,
+  }) => {
+    const { ref, inView } = useInView({ triggerOnce: true });
+    const videoRef = useRef(null);
 
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRefs.current[index] = videoRef.current;
+    useEffect(() => {
+      if (videoRef.current) {
+        videoRefs.current[index] = videoRef.current;
+      }
+    }, [index, videoRefs]);
+
+    if (!content || !content.content) return null;
+
+    if (isPowerBIUrl(content.content)) {
+      return (
+        <iframe
+          src={getContentUrl(content.content)}
+          className="w-full h-full"
+          title="Embedded Power BI Report"
+          frameBorder="0"
+          allowFullScreen
+        />
+      );
+    } else if (isWebpageUrl(content.content)) {
+      return <WebpageEmbed webpageUrl={getContentUrl(content.content)} />;
+    } else if (content.content.endsWith(".mp4")) {
+      return (
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            <video
+              ref={videoRef}
+              src={getContentUrl(content.content)}
+              autoPlay={!isPaused}
+              muted
+              className="w-full h-full object-contain"
+              onTimeUpdate={(e) =>
+                setProgress((e.target.currentTime / e.target.duration) * 100)
+              }
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
+    } else if (
+      content.content.endsWith(".pdf") ||
+      content.content.endsWith(".pptx") ||
+      content.content.endsWith(".ppt") ||
+      content.content.endsWith(".docx") ||
+      content.content.endsWith(".doc")
+    ) {
+      return (
+        <DocumentContent
+          content={content.content}
+          getContentUrl={getContentUrl}
+        />
+      );
+    } else if (isYouTubeUrl(content.content)) {
+      return (
+        <YouTubeLive
+          liveUrl={getContentUrl(content.content)}
+          showControls={false}
+        />
+      );
+    } else {
+      return (
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            <img
+              src={getContentUrl(content.content)}
+              alt="Preview content"
+              className="w-full h-full object-contain"
+              loading="lazy"
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
     }
-  }, [index, videoRefs]);
-
-  const videoRef = useRef(null);
-
-  if (!content || !content.content) return null;
-
-  if (isPowerBIUrl(content.content)) {
-    return (
-      <iframe
-        src={getContentUrl(content.content)}
-        className="w-full h-full"
-        title="Embedded Power BI Report"
-        frameBorder="0"
-        allowFullScreen
-      />
-    );
-  } else if (isWebpageUrl(content.content)) {
-    return <WebpageEmbed webpageUrl={getContentUrl(content.content)} />;
-  } else if (content.content.endsWith(".mp4")) {
-    return (
-      <div ref={ref} className="w-full h-full">
-        {inView ? (
-          <video
-            ref={videoRef}
-            src={getContentUrl(content.content)}
-            autoPlay={!isPaused}
-            muted
-            className="w-full h-full object-contain"
-            onTimeUpdate={(e) =>
-              setProgress((e.target.currentTime / e.target.duration) * 100)
-            }
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
-      </div>
-    );
-  } else if (
-    content.content.endsWith(".pdf") ||
-    content.content.endsWith(".pptx") ||
-    content.content.endsWith(".ppt") ||
-    content.content.endsWith(".docx") ||
-    content.content.endsWith(".doc")
-  ) {
-    return <DocumentContent content={content.content} getContentUrl={getContentUrl} />;
-  } else if (isYouTubeUrl(content.content)) {
-    return <YouTubeLive liveUrl={getContentUrl(content.content)} showControls={false} />;
-  } else {
-    return (
-      <div ref={ref} className="w-full h-full">
-        {inView ? (
-          <img
-            src={getContentUrl(content.content)}
-            alt="Preview content"
-            className="w-full h-full object-contain"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
-      </div>
-    );
   }
-});
+);
 
 const Preview = () => {
   const { url } = useParams();
@@ -341,8 +446,10 @@ const Preview = () => {
     const startTimeParts = timeWindow.startTime.split(":");
     const endTimeParts = timeWindow.endTime.split(":");
 
-    const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
-    const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+    const startMinutes =
+      parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+    const endMinutes =
+      parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
 
     return nowTime >= startMinutes && nowTime <= endMinutes;
   };
@@ -379,13 +486,17 @@ const Preview = () => {
     let isWithinTimeWindow = false;
 
     if (schedule.timeWindows && schedule.timeWindows.length > 0) {
-      isWithinTimeWindow = schedule.timeWindows.some((window) => isTimeWindowActive(window));
+      isWithinTimeWindow = schedule.timeWindows.some((window) =>
+        isTimeWindowActive(window)
+      );
     } else if (schedule.startTime && schedule.endTime) {
       const nowTime = now.getHours() * 60 + now.getMinutes();
       const startTimeParts = schedule.startTime.split(":");
       const endTimeParts = schedule.endTime.split(":");
-      const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
-      const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
+      const startMinutes =
+        parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
+      const endMinutes =
+        parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
       isWithinTimeWindow = nowTime >= startMinutes && nowTime <= endMinutes;
     } else {
       isWithinTimeWindow = true;
@@ -410,7 +521,9 @@ const Preview = () => {
     const now = new Date();
 
     const exclusiveContent = content.filter(
-      (item) => isScheduledNow(item.schedule) && item.schedule?.displayMode === "exclusive"
+      (item) =>
+        isScheduledNow(item.schedule) &&
+        item.schedule?.displayMode === "exclusive"
     );
 
     if (exclusiveContent.length > 0) {
@@ -452,14 +565,20 @@ const Preview = () => {
       const parsedData = JSON.parse(cachedData);
       setMediaContent(getActiveContent(parsedData.url_content || []));
       setIsEnabled(parsedData.isEnabled);
-      setScheduledAt(parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null);
-      setExpiresAt(parsedData.expiresAt ? new Date(parsedData.expiresAt) : null);
+      setScheduledAt(
+        parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null
+      );
+      setExpiresAt(
+        parsedData.expiresAt ? new Date(parsedData.expiresAt) : null
+      );
       setCustomTicker(parsedData.custom_ticker || null);
     }
-  
+
     setIsLoading(true);
     try {
-      const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`);
+      const response = await axios.post(
+        `${apiBaseUrl}/api/upload/preview/${url}`
+      );
       if (response.data) {
         localStorage.setItem(cacheKey, JSON.stringify(response.data));
         const content = response.data.url_content || [];
@@ -477,8 +596,12 @@ const Preview = () => {
           setVisibleItems([fallbackItem]);
         }
         setIsEnabled(response.data.isEnabled);
-        setScheduledAt(response.data.scheduledAt ? new Date(response.data.scheduledAt) : null);
-        setExpiresAt(response.data.expiresAt ? new Date(response.data.expiresAt) : null);
+        setScheduledAt(
+          response.data.scheduledAt ? new Date(response.data.scheduledAt) : null
+        );
+        setExpiresAt(
+          response.data.expiresAt ? new Date(response.data.expiresAt) : null
+        );
         setCustomTicker(response.data.custom_ticker || null);
       } else {
         setVisibleItems([fallbackItem]);
@@ -497,7 +620,11 @@ const Preview = () => {
       return;
     }
     const now = Date.now();
-    if (cache.weather.data && cache.weather.timestamp && now - cache.weather.timestamp < cache.weather.ttl) {
+    if (
+      cache.weather.data &&
+      cache.weather.timestamp &&
+      now - cache.weather.timestamp < cache.weather.ttl
+    ) {
       setWeather(cache.weather.data);
       return;
     }
@@ -514,7 +641,11 @@ const Preview = () => {
 
   const fetchNews = async () => {
     const now = Date.now();
-    if (cache.news.data && cache.news.timestamp && now - cache.news.timestamp < cache.news.ttl) {
+    if (
+      cache.news.data &&
+      cache.news.timestamp &&
+      now - cache.news.timestamp < cache.news.ttl
+    ) {
       setNews(cache.news.data);
       return;
     }
@@ -528,7 +659,9 @@ const Preview = () => {
       const responses = await Promise.all(
         feeds.map((feed) =>
           axios
-            .get(`${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feed)}`)
+            .get(
+              `${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feed)}`
+            )
             .then((res) => res.data.items || [])
             .catch(() => [])
         )
@@ -551,11 +684,13 @@ const Preview = () => {
   };
 
   const updateVisibleItems = (layout, groupedContent, index) => {
-    const layoutConfig = layoutOptions.find((option) => option.id === layout) || layoutOptions[0];
+    const layoutConfig =
+      layoutOptions.find((option) => option.id === layout) || layoutOptions[0];
     const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const allItems = mediaContent.length > 0
-      ? mediaContent.map((item, idx) => ({ ...item, originalIndex: idx }))
-      : [fallbackItem];
+    const allItems =
+      mediaContent.length > 0
+        ? mediaContent.map((item, idx) => ({ ...item, originalIndex: idx }))
+        : [fallbackItem];
 
     if (index >= allItems.length) {
       setVisibleItems([fallbackItem]);
@@ -592,7 +727,6 @@ const Preview = () => {
       fetchWeather("Mumbai");
     }
   };
-
 
   useEffect(() => {
     const loadData = async () => {
@@ -694,7 +828,9 @@ const Preview = () => {
         const currentItem = mediaContent[currentItemIndex];
         const currentLayout = currentItem?.layout || "single";
         setCurrentLayout(currentLayout);
-        const layoutConfig = layoutOptions.find((option) => option.id === currentLayout) || layoutOptions[0];
+        const layoutConfig =
+          layoutOptions.find((option) => option.id === currentLayout) ||
+          layoutOptions[0];
         const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
         const delay = currentItem?.time * 1000 || 15000;
         const groupedContent = groupMediaByLayout(mediaContent);
@@ -741,6 +877,7 @@ const Preview = () => {
     setShowControls(true);
     // autoHideControls();
   };
+
   useEffect(() => {
     const handleMouseMove = () => {
       setShowControls(true);
@@ -759,10 +896,13 @@ const Preview = () => {
   const goNext = () => {
     const currentItem = mediaContent[currentIndex] || fallbackItem;
     const layoutConfig =
-      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) || layoutOptions[0];
+      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) ||
+      layoutOptions[0];
     const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
     const nextIndex = currentIndex + itemsPerPage;
-    const groupedContent = groupMediaByLayout(mediaContent.length > 0 ? mediaContent : [fallbackItem]);
+    const groupedContent = groupMediaByLayout(
+      mediaContent.length > 0 ? mediaContent : [fallbackItem]
+    );
     if (nextIndex >= mediaContent.length && mediaContent.length > 0) {
       setCurrentIndex(0);
       const firstLayout = mediaContent[0]?.layout || "single";
@@ -784,10 +924,13 @@ const Preview = () => {
   const goPrev = () => {
     const currentItem = mediaContent[currentIndex] || fallbackItem;
     const layoutConfig =
-      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) || layoutOptions[0];
+      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) ||
+      layoutOptions[0];
     const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
     const prevIndex = Math.max(0, currentIndex - itemsPerPage);
-    const groupedContent = groupMediaByLayout(mediaContent.length > 0 ? mediaContent : [fallbackItem]);
+    const groupedContent = groupMediaByLayout(
+      mediaContent.length > 0 ? mediaContent : [fallbackItem]
+    );
     setCurrentIndex(prevIndex);
     const prevItem = mediaContent[prevIndex] || fallbackItem;
     const prevLayout = prevItem?.layout || "single";
@@ -806,15 +949,34 @@ const Preview = () => {
     if (content.startsWith(prefix)) {
       return content.slice(prefix.length);
     }
-    return content.startsWith("http") ? content : `${apiBaseUrl}/${content}`;
+    return content.startsWith("http")
+      ? content
+      : `${apiBaseUrl}/${content}`;
   };
 
   const isWebpageUrl = (url) => {
     if (!url) return false;
-    const excludedExtensions = [".mp4", ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".gif"];
-    const hasExcludedExtension = excludedExtensions.some((ext) => url.toLowerCase().endsWith(ext));
+    const excludedExtensions = [
+      ".mp4",
+      ".pdf",
+      ".ppt",
+      ".pptx",
+      ".doc",
+      ".docx",
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".gif",
+    ];
+    const hasExcludedExtension = excludedExtensions.some((ext) =>
+      url.toLowerCase().endsWith(ext)
+    );
     const isSpecialUrl = isPowerBIUrl(url) || isYouTubeLiveUrl(url);
-    return (url.startsWith("http://") || url.startsWith("https://")) && !isSpecialUrl && !hasExcludedExtension;
+    return (
+      (url.startsWith("http://") || url.startsWith("https://")) &&
+      !isSpecialUrl &&
+      !hasExcludedExtension
+    );
   };
 
   const getGridClasses = () => {
@@ -845,13 +1007,26 @@ const Preview = () => {
       onClick={togglePlayPause}
     >
       {isLoading ? (
-        renderFallbackUI("Wait, your content is loading", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "Wait, your content is loading",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       ) : !isEnabled ? (
-        renderFallbackUI("This URL is currently inactive.", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "This URL is currently inactive.",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       ) : mediaContent.length > 0 ? (
         <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
           {visibleItems.map((item, index) => (
-            <div key={index} className="relative w-full h-full bg-gray-900 rounded overflow-hidden">
+            <div
+              key={index}
+              className="relative w-full h-full bg-gray-900 rounded overflow-hidden"
+            >
               <MediaItem
                 content={item}
                 index={currentIndex + index}
@@ -865,21 +1040,32 @@ const Preview = () => {
           ))}
         </div>
       ) : (
-        renderFallbackUI("This URL has no content to display.", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "This URL has no content to display.",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       )}
 
       {isEnabled && countdownType === "end" && (
         <div className="absolute top-4 right-4 bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <FaClock size={20} className="text-red-400" />
-            <span className="font-mono">{formatTimeRemaining(timeRemaining)}</span>
+            <span className="font-mono">
+              {formatTimeRemaining(timeRemaining)}
+            </span>
           </div>
         </div>
       )}
 
       {weather && (
         <div className="absolute bottom-0 left-0 bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm flex items-center gap-2">
-          <img src={`https:${weather.current.condition.icon}`} alt="Weather Icon" className="w-10 h-10" />
+          <img
+            src={`https:${weather.current.condition.icon}`}
+            alt="Weather Icon"
+            className="w-10 h-10"
+          />
           <div>
             <h3 className="text-xl font-semibold">{weather.location.name}</h3>
             <p className="text-lg">
@@ -923,7 +1109,9 @@ const Preview = () => {
           <div className="news-ticker-container relative w-full">
             <div className="news-ticker">
               {customTicker ? (
-                <span className="news-item inline-block px-6 text-white text-lg">{customTicker}</span>
+                <span className="news-item inline-block px-6 text-white text-lg">
+                  {customTicker}
+                </span>
               ) : (
                 <>
                   {news.map((article, index) => (
@@ -931,7 +1119,8 @@ const Preview = () => {
                       key={`news-item-1-${index}`}
                       className="news-item inline-block px-6 text-white text-lg"
                     >
-                      <strong>{article.title}</strong> - {formatDescription(article.description)}
+                      <strong>{article.title}</strong> -{" "}
+                      {formatDescription(article.description)}
                     </span>
                   ))}
                   {news.map((article, index) => (
@@ -939,7 +1128,8 @@ const Preview = () => {
                       key={`news-item-2-${index}`}
                       className="news-item inline-block px-6 text-white text-lg"
                     >
-                      <strong>{article.title}</strong> - {formatDescription(article.description)}
+                      <strong>{article.title}</strong> -{" "}
+                      {formatDescription(article.description)}
                     </span>
                   ))}
                 </>
@@ -949,37 +1139,40 @@ const Preview = () => {
         </div>
       )}
 
-      {showControls && isEnabled && mediaContent.length > 0 && !isAnyPowerBIContent() && (
-        <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              goPrev();
-            }}
-          >
-            <FaChevronLeft size={25} />
-          </button>
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlayPause();
-            }}
-          >
-            {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
-          </button>
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              goNext();
-            }}
-          >
-            <FaChevronRight size={25} />
-          </button>
-        </div>
-      )}
+      {showControls &&
+        isEnabled &&
+        mediaContent.length > 0 &&
+        !isAnyPowerBIContent() && (
+          <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                goPrev();
+              }}
+            >
+              <FaChevronLeft size={25} />
+            </button>
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlayPause();
+              }}
+            >
+              {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
+            </button>
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                goNext();
+              }}
+            >
+              <FaChevronRight size={25} />
+            </button>
+          </div>
+        )}
     </div>
   );
 };
