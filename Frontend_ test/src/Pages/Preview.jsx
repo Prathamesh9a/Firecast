@@ -94,37 +94,75 @@ const isYouTubeUrl = (url) => {
   );
 };
 
+const getYouTubeEmbedUrl = (url) => {
+  if (!url) return "";
+
+  // Handle youtu.be short links
+  if (url.includes("youtu.be")) {
+    const videoId = url.split("youtu.be/")[1].split(/[?&]/)[0];
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0`;
+  }
+
+  // Handle regular YouTube URLs
+  if (url.includes("youtube.com")) {
+    const videoIdMatch = url.match(/(?:v=|v\/|embed\/|watch\?v=|watch\?.+&v=)([^&?]+)/);
+    if (videoIdMatch && videoIdMatch[1]) {
+      return `https://www.youtube.com/embed/${videoIdMatch[1]}?autoplay=1&mute=1&controls=0`;
+    }
+  }
+
+  return url;
+};
+
 // PageRenderer Component
 const PageRenderer = ({ page, pageNum }) => {
   const canvasRef = useRef(null);
 
   useEffect(() => {
-    if (canvasRef.current && page.viewport) {
+    if (canvasRef.current && page && typeof page.render === "function") {
+      console.log(`Rendering PDF page ${pageNum}`);
       const canvas = canvasRef.current;
       const context = canvas.getContext("2d");
-      canvas.height = page.viewport.height;
-      canvas.width = page.viewport.width;
+      const viewport = page.getViewport({ scale: 1.0 }); // Recompute viewport to ensure validity
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
 
       const renderContext = {
         canvasContext: context,
-        viewport: page.viewport,
+        viewport: viewport,
       };
 
       let isCancelled = false;
-      const renderTask = page.page.render(renderContext);
+      const renderTask = page.render(renderContext);
 
-      renderTask.promise.catch((error) => {
-        if (!isCancelled) {
-          console.error(`Error rendering page ${pageNum}:`, error);
-        }
-      });
+      renderTask.promise
+        .then(() => {
+          console.log(`Successfully rendered page ${pageNum}`);
+        })
+        .catch((error) => {
+          if (!isCancelled) {
+            console.error(`Error rendering page ${pageNum}:`, error);
+          }
+        });
 
       return () => {
         isCancelled = true;
-        renderTask.cancel();
+        if (renderTask.cancel) {
+          renderTask.cancel();
+        }
       };
+    } else {
+      console.error(`Invalid page object for page ${pageNum}:`, page);
     }
   }, [page, pageNum]);
+
+  if (!page || typeof page.render !== "function") {
+    return (
+      <div className="w-full h-auto mb-4 mx-auto bg-gray-900 text-white flex items-center justify-center">
+        Failed to render PDF page {pageNum}
+      </div>
+    );
+  }
 
   return (
     <canvas
@@ -135,131 +173,116 @@ const PageRenderer = ({ page, pageNum }) => {
   );
 };
 
-// DocumentContent Component with Auto-Scrolling
-const DocumentContent = ({ content, getContentUrl }) => {
+// DocumentContent Component with Auto-Scrolling Controlled by isPaused
+const DocumentContent = ({ content, getContentUrl, isPaused }) => {
   const fileType = content.split(".").pop().toLowerCase();
   const fileUrl = getContentUrl(content);
   const [pages, setPages] = useState([]);
+  const [error, setError] = useState(null);
   const containerRef = useRef(null);
-  const { ref, inView } = useInView({ triggerOnce: false }); // Track visibility
-  const isScrollingRef = useRef(false);
-  const userInteractionTimeoutRef = useRef(null);
+  const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.1 });
 
   // Load PDF pages
   useEffect(() => {
     if (fileType === "pdf" && inView) {
+      console.log("Loading PDF:", fileUrl);
       const loadPdf = async () => {
         try {
           const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+          console.log("PDF loaded successfully, pages:", pdf.numPages);
           const numPages = pdf.numPages;
           const pageData = [];
 
           for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-            const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.0 });
-            pageData.push({ pageNum, viewport, page });
+            try {
+              const page = await pdf.getPage(pageNum);
+              const viewport = page.getViewport({ scale: 1.0 });
+              console.log(`Page ${pageNum} loaded with viewport:`, viewport);
+              pageData.push({ pageNum, viewport, page });
+            } catch (pageError) {
+              console.error(`Error loading page ${pageNum}:`, pageError);
+            }
           }
 
-          setPages(pageData);
+          if (pageData.length === 0) {
+            setError("No valid pages found in PDF");
+          } else {
+            setPages(pageData);
+            setError(null);
+          }
         } catch (error) {
           console.error("Error loading PDF:", error);
+          setError("Failed to load PDF document");
         }
       };
       loadPdf();
     }
   }, [fileType, fileUrl, inView]);
 
-  // Auto-scrolling logic for PDF and PPT
+  // Auto-scrolling logic controlled by isPaused
   useEffect(() => {
     if (
       (fileType === "pdf" || fileType === "ppt" || fileType === "pptx") &&
       inView &&
+      !isPaused &&
       containerRef.current
     ) {
+      console.log(`Starting auto-scroll for ${fileType}, isPaused: ${isPaused}`);
       const container = containerRef.current;
-
-      // Start auto-scrolling
-      const startScrolling = () => {
-        if (!isScrollingRef.current) {
-          isScrollingRef.current = true;
-          const scrollInterval = setInterval(() => {
-            if (container.scrollTop + container.clientHeight >= container.scrollHeight) {
-              // Reached the bottom, reset to top
-              container.scrollTo({ top: 0, behavior: "smooth" });
-            } else {
-              // Scroll down slowly
-              container.scrollBy({ top: 1, behavior: "auto" });
-            }
-          }, 50); // ~20px per second for readability
-
-          // Store interval ID for cleanup
-          return () => clearInterval(scrollInterval);
+      const scrollInterval = setInterval(() => {
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight) {
+          console.log("Reached bottom, resetting to top");
+          container.scrollTo({ top: 0, behavior: "smooth" });
+        } else {
+          container.scrollBy({ top: 1, behavior: "auto" });
         }
-      };
+      }, 50); // ~20px per second
 
-      // Pause scrolling on user interaction
-      const handleUserInteraction = () => {
-        isScrollingRef.current = false;
-        clearTimeout(userInteractionTimeoutRef.current);
-        // Resume scrolling after 5 seconds of inactivity
-        userInteractionTimeoutRef.current = setTimeout(() => {
-          if (inView) {
-            startScrolling();
-          }
-        }, 5000);
-      };
-
-      // Event listeners for user interaction
-      container.addEventListener("wheel", handleUserInteraction);
-      container.addEventListener("touchmove", handleUserInteraction);
-
-      // Start scrolling initially
-      const cleanup = startScrolling();
-
-      // Cleanup on unmount or when inView changes
       return () => {
-        if (cleanup) cleanup();
-        container.removeEventListener("wheel", handleUserInteraction);
-        container.removeEventListener("touchmove", handleUserInteraction);
-        clearTimeout(userInteractionTimeoutRef.current);
+        console.log("Cleaning up scroll interval");
+        clearInterval(scrollInterval);
       };
     }
-  }, [fileType, inView]);
+  }, [fileType, inView, isPaused]);
 
   if (fileType === "pdf") {
     return (
-      <div
-        ref={(node) => {
-          containerRef.current = node;
-          ref(node);
-        }}
-        className="w-full h-screen overflow-y-auto scrollbar-hidden"
-        style={{ scrollBehavior: "smooth" }}
-      >
-        {inView ? (
-          <div
-            className="w-full min-h-screen flex flex-col items-center p-4 bg-gray-900"
-          >
-            {pages.length > 0 ? (
-              pages.map((page) => (
-                <div
-                  key={`page-container-${page.pageNum}`}
-                  className="w-full max-w-[95%] mb-4"
-                >
-                  <PageRenderer page={page} pageNum={page.pageNum} />
+      <div className="relative w-full h-screen">
+        <div
+          ref={(node) => {
+            containerRef.current = node;
+            ref(node);
+          }}
+          className="w-full h-screen overflow-y-auto scrollbar-hidden"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {inView ? (
+            <div className="w-full min-h-screen flex flex-col items-center p-4 bg-gray-900">
+              {error ? (
+                <div className="w-full h-screen flex items-center justify-center text-white">
+                  {error}
                 </div>
-              ))
-            ) : (
-              <div className="w-full h-screen flex items-center justify-center">
-                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
+              ) : pages.length > 0 ? (
+                pages.map((page) => (
+                  <div
+                    key={`page-container-${page.pageNum}`}
+                    className="w-full max-w-[95%] mb-4"
+                  >
+                    <PageRenderer page={page.page} pageNum={page.pageNum} />
+                  </div>
+                ))
+              ) : (
+                <div className="w-full h-screen flex items-center justify-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -271,28 +294,37 @@ const DocumentContent = ({ content, getContentUrl }) => {
     fileType === "docx"
   ) {
     return (
-      <div
-        ref={(node) => {
-          containerRef.current = node;
-          ref(node);
-        }}
-        className="w-full h-full overflow-y-auto scrollbar-hidden"
-        style={{ scrollBehavior: "smooth" }}
-      >
-        {inView ? (
-          <iframe
-            src={getContentUrl(content)}
-            width="100%"
-            height="100%"
-            frameBorder="0"
-            title={`${fileType.toUpperCase()} Viewer`}
-            className="document-iframe"
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
+      <div className="relative w-full h-full">
+        <div
+          ref={(node) => {
+            containerRef.current = node;
+            ref(node);
+          }}
+          className="w-full h-full overflow-y-auto scrollbar-hidden"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {inView ? (
+            <>
+              <iframe
+                src={getContentUrl(content)}
+                width="100%"
+                height="100%"
+                frameBorder="0"
+                title={`${fileType.toUpperCase()} Viewer`}
+                className="document-iframe"
+              />
+              {(fileType === "ppt" || fileType === "pptx") && (
+                <div className="absolute top-4 left-4 bg-yellow-600 text-white p-2 rounded-lg opacity-80">
+                  Note: Auto-scrolling for PPT/PPTX may be limited. Consider converting to PDF for better control.
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -342,7 +374,6 @@ const MediaItem = React.memo(
               ref={videoRef}
               src={getContentUrl(content.content)}
               autoPlay={!isPaused}
-              muted
               className="w-full h-full object-contain"
               onTimeUpdate={(e) =>
                 setProgress((e.target.currentTime / e.target.duration) * 100)
@@ -366,14 +397,25 @@ const MediaItem = React.memo(
         <DocumentContent
           content={content.content}
           getContentUrl={getContentUrl}
+          isPaused={isPaused}
         />
       );
     } else if (isYouTubeUrl(content.content)) {
       return (
-        <YouTubeLive
-          liveUrl={getContentUrl(content.content)}
-          showControls={false}
-        />
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            <YouTubeLive
+              liveUrl={getContentUrl(content.content)}
+              isPaused={isPaused}
+              inView={inView}
+              showControls={false}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
       );
     } else {
       return (
@@ -873,7 +915,10 @@ const Preview = () => {
   }, [isPaused]);
 
   const togglePlayPause = () => {
-    setIsPaused((prev) => !prev);
+    setIsPaused((prev) => {
+      console.log(`Toggling slideshow and scrolling to ${!prev ? "paused" : "playing"}`);
+      return !prev;
+    });
     setShowControls(true);
     // autoHideControls();
   };
@@ -881,16 +926,11 @@ const Preview = () => {
   useEffect(() => {
     const handleMouseMove = () => {
       setShowControls(true);
-      // autoHideControls(); // Auto-hide controls after showing
+      // autoHideControls();
     };
 
-    // Add event listener for mouse movement
     window.addEventListener("mousemove", handleMouseMove);
-
-    // Cleanup event listener on component unmount
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-    };
+    return () => window.removeEventListener("mousemove", handleMouseMove);
   }, []);
 
   const goNext = () => {
@@ -949,6 +989,10 @@ const Preview = () => {
     if (content.startsWith(prefix)) {
       return content.slice(prefix.length);
     }
+    if (isYouTubeUrl(content)) {
+      return getYouTubeEmbedUrl(content);
+    }
+
     return content.startsWith("http")
       ? content
       : `${apiBaseUrl}/${content}`;
