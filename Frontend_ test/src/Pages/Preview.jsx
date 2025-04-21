@@ -13,6 +13,10 @@ import "./preview.css";
 import { Clock } from "lucide-react";
 import YouTubeLive from "./YouTubeLive";
 import WebpageEmbed from "./WebpageEmbed";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Set the worker source to the local file in the public folder
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 const weatherApiKey = process.env.REACT_APP_WEATHER_API_KEY;
@@ -44,12 +48,12 @@ const cache = {
 // Fallback UI with blank screen and centered text
 const renderFallbackUI = (message, countdownType, timeRemaining, formatTimeRemaining) => (
   <div className="w-full h-full bg-black flex flex-col items-center justify-center">
-    <p className="text-white text-2xl font-bold">{message}</p>
-    {message === "Wait, your content is loading" && (
-      <div className="mt-4 animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
-    )}
+    <div className="grid grid-cols-1 w-full h-full gap-2 p-2">
+      <div className="w-full h-full bg-gray-800 animate-pulse rounded"></div>
+    </div>
+    <p className="text-white text-2xl font-bold absolute">{message}</p>
     {countdownType === "start" && (
-      <div className="flex items-center gap-2 mt-4">
+      <div className="flex items-center gap-2 mt-4 absolute">
         <FaClock size={20} className="text-yellow-400" />
         <span className="text-xl font-mono text-white">
           {formatTimeRemaining(timeRemaining)}
@@ -85,32 +89,106 @@ const isYouTubeUrl = (url) => {
   );
 };
 
+const PageRenderer = ({ page, pageNum }) => {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    if (canvasRef.current && page.viewport) {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext("2d");
+      canvas.height = page.viewport.height;
+      canvas.width = page.viewport.width;
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: page.viewport,
+      };
+
+      let isCancelled = false;
+      const renderTask = page.page.render(renderContext);
+
+      renderTask.promise.catch((error) => {
+        if (!isCancelled) {
+          console.error(`Error rendering page ${pageNum}:`, error);
+        }
+      });
+
+      return () => {
+        isCancelled = true;
+        renderTask.cancel();
+      };
+    }
+  }, [page, pageNum]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="w-full h-auto mb-4 mx-auto"
+      key={`page-${pageNum}`}
+    />
+  );
+};
+
 // DocumentContent Component
 const DocumentContent = ({ content, getContentUrl }) => {
   const fileType = content.split(".").pop().toLowerCase();
-  const fileUrl = encodeURIComponent(getContentUrl(content));
+  const fileUrl = getContentUrl(content);
+  const [pages, setPages] = useState([]);
+  const containerRef = useRef(null);
   const { ref, inView } = useInView({ triggerOnce: true });
+
+  useEffect(() => {
+    if (fileType === "pdf" && inView) {
+      const loadPdf = async () => {
+        try {
+          const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+          const numPages = pdf.numPages;
+          const pageData = [];
+
+          for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 1.0 });
+            pageData.push({ pageNum, viewport, page });
+          }
+
+          setPages(pageData);
+        } catch (error) {
+          console.error("Error loading PDF:", error);
+        }
+      };
+      loadPdf();
+    }
+  }, [fileType, fileUrl, inView]);
 
   if (fileType === "pdf") {
     return (
-      <div ref={ref} className="w-full h-full">
+      <div ref={ref} className="w-full h-screen overflow-y-auto scrollbar-hidden" style={{ scrollBehavior: "smooth" }}>
         {inView ? (
-          <iframe
-            src={getContentUrl(content)}
-            width="100%"
-            height="100%"
-            frameBorder="0"
-            title="PDF Viewer"
-            className="document-iframe"
-          />
+          <div
+            ref={containerRef}
+            className="w-full min-h-screen flex flex-col items-center p-4 bg-gray-900"
+          >
+            {pages.length > 0 ? (
+              pages.map((page) => (
+                <div key={`page-container-${page.pageNum}`} className="w-full max-w-[95%] mb-4">
+                  <PageRenderer page={page} pageNum={page.pageNum} />
+                </div>
+              ))
+            ) : (
+              <div className="w-full h-screen flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+              </div>
+            )}
+          </div>
         ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+          <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
           </div>
         )}
       </div>
     );
   }
+
   if (fileType === "ppt" || fileType === "pptx" || fileType === "doc" || fileType === "docx") {
     return (
       <div ref={ref} className="w-full h-full">
@@ -131,11 +209,13 @@ const DocumentContent = ({ content, getContentUrl }) => {
       </div>
     );
   }
+
   return null;
 };
 
+
 // MediaItem Component
-const MediaItem = ({ content, index, isPaused, setProgress, getContentUrl, isWebpageUrl, videoRefs }) => {
+const MediaItem = React.memo(({ content, index, isPaused, setProgress, getContentUrl, isWebpageUrl, videoRefs }) => {
   const { ref, inView } = useInView({ triggerOnce: true });
 
   useEffect(() => {
@@ -209,7 +289,7 @@ const MediaItem = ({ content, index, isPaused, setProgress, getContentUrl, isWeb
       </div>
     );
   }
-};
+});
 
 const Preview = () => {
   const { url } = useParams();
@@ -353,21 +433,35 @@ const Preview = () => {
   };
 
   const preloadMedia = (content) => {
-    if (content.length > 0 && content[0].content) {
-      const url = getContentUrl(content[0].content);
-      const link = document.createElement("link");
-      link.rel = "preload";
-      link.href = url;
-      link.as = content[0].content.endsWith(".mp4") ? "video" : "image";
-      document.head.appendChild(link);
-    }
+    content.slice(0, 5).forEach((item) => {
+      if (item.content) {
+        const url = getContentUrl(item.content);
+        const link = document.createElement("link");
+        link.rel = "preload";
+        link.href = url;
+        link.as = item.content.endsWith(".mp4") ? "video" : "image";
+        document.head.appendChild(link);
+      }
+    });
   };
 
   const fetchData = async () => {
+    const cacheKey = `preview_${url}`;
+    const cachedData = localStorage.getItem(cacheKey);
+    if (cachedData) {
+      const parsedData = JSON.parse(cachedData);
+      setMediaContent(getActiveContent(parsedData.url_content || []));
+      setIsEnabled(parsedData.isEnabled);
+      setScheduledAt(parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null);
+      setExpiresAt(parsedData.expiresAt ? new Date(parsedData.expiresAt) : null);
+      setCustomTicker(parsedData.custom_ticker || null);
+    }
+  
     setIsLoading(true);
     try {
       const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`);
       if (response.data) {
+        localStorage.setItem(cacheKey, JSON.stringify(response.data));
         const content = response.data.url_content || [];
         setAllContent(content);
         const activeContent = getActiveContent(content);
@@ -499,13 +593,17 @@ const Preview = () => {
     }
   };
 
-  // Combined data fetching
+
   useEffect(() => {
     const loadData = async () => {
-      await fetchData();
-      setTimeout(async () => {
-        await Promise.all([fetchWeather(), fetchNews()]);
-      }, 5000);
+      setIsLoading(true);
+      try {
+        await Promise.all([fetchData(), fetchWeather(), fetchNews()]);
+      } catch (error) {
+        console.error("Error loading data:", error);
+      } finally {
+        setIsLoading(false);
+      }
     };
     loadData();
     const refreshInterval = setInterval(fetchData, 5 * 60 * 1000);
@@ -641,8 +739,22 @@ const Preview = () => {
   const togglePlayPause = () => {
     setIsPaused((prev) => !prev);
     setShowControls(true);
-    autoHideControls();
+    // autoHideControls();
   };
+  useEffect(() => {
+    const handleMouseMove = () => {
+      setShowControls(true);
+      // autoHideControls(); // Auto-hide controls after showing
+    };
+
+    // Add event listener for mouse movement
+    window.addEventListener("mousemove", handleMouseMove);
+
+    // Cleanup event listener on component unmount
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+    };
+  }, []);
 
   const goNext = () => {
     const currentItem = mediaContent[currentIndex] || fallbackItem;
@@ -666,7 +778,7 @@ const Preview = () => {
       updateVisibleItems(nextLayout, groupedContent, nextIndex);
     }
     setShowControls(true);
-    autoHideControls();
+    // autoHideControls();
   };
 
   const goPrev = () => {
@@ -682,7 +794,7 @@ const Preview = () => {
     setCurrentLayout(prevLayout);
     updateVisibleItems(prevLayout, groupedContent, prevIndex);
     setShowControls(true);
-    autoHideControls();
+    // autoHideControls();
   };
 
   const autoHideControls = () => {
