@@ -24,7 +24,7 @@
   }
 }
 
-  /* PDF and Document Viewer Containers */
+/* PDF and Document Viewer Containers */
 .pdf-container, .office-container {
   position: absolute;
   top: 0;
@@ -40,7 +40,7 @@
   border: none;
 }
 
-/* Ensure the media preview container fills the screen */
+/* Media preview */
 .media-preview {
   width: 100vw;
   height: 100vh;
@@ -57,3 +57,16 @@
   height: 100%;
 }
 
+.w-full.h-full.overflow-auto {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on touch devices */
+  overscroll-behavior: contain; /* Prevent overscrolling */
+}
+
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-hidden {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
+}

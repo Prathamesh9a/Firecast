@@ -9,6 +9,7 @@ import { IoArrowBackCircleOutline } from "react-icons/io5";
 import { AiOutlineArrowUp, AiOutlineArrowDown } from "react-icons/ai";
 import { BiLayout } from "react-icons/bi";
 import { IoTimeOutline } from "react-icons/io5";
+import { FaFileArrowUp } from "react-icons/fa6";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 import Header from "./Header";
@@ -17,16 +18,17 @@ import ContentScheduler from "./ContentScheduler";
 import "./styles.css";
 import Swal from "sweetalert2";
 import { motion, AnimatePresence } from "framer-motion";
+import { v4 as uuidv4 } from "uuid";
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
 const layoutOptions = [
-  { id: "single", name: "Single View", cols: 1, rows: 1 },
-  { id: "2x1", name: "2 Items Horizontal", cols: 2, rows: 1 },
-  { id: "1x2", name: "2 Items Vertical", cols: 1, rows: 2 },
-  { id: "2x2", name: "4 Items Grid", cols: 2, rows: 2 },
-  { id: "3x1", name: "3 Items Horizontal", cols: 3, rows: 1 },
-  { id: "1x3", name: "3 Items Vertical", cols: 1, rows: 3 },
+  { id: "single", name: "Single View", cols: 1, rows: 1, itemCount: 1 },
+  { id: "2x1", name: "2 Items Horizontal", cols: 2, rows: 1, itemCount: 2 },
+  { id: "1x2", name: "2 Items Vertical", cols: 1, rows: 2, itemCount: 2 },
+  { id: "2x2", name: "4 Items Grid", cols: 2, rows: 2, itemCount: 4 },
+  { id: "3x1", name: "3 Items Horizontal", cols: 3, rows: 1, itemCount: 3 },
+  { id: "1x3", name: "3 Items Vertical", cols: 1, rows: 3, itemCount: 3 },
 ];
 
 const EditUrl = () => {
@@ -40,10 +42,9 @@ const EditUrl = () => {
   const [expiresAt, setExpiresAt] = useState(null);
   const [currentUrlId, setCurrentUrlId] = useState(null);
   const [isLayoutModalOpen, setIsLayoutModalOpen] = useState(false);
-  const [currentLayoutIndex, setCurrentLayoutIndex] = useState(null);
+  const [currentGroupId, setCurrentGroupId] = useState(null);
   const [isSchedulerModalOpen, setIsSchedulerModalOpen] = useState(false);
-  const [currentSchedulerIndex, setCurrentSchedulerIndex] = useState(null);
-  // New states for custom ticker
+  const [currentSchedulerGroupId, setCurrentSchedulerGroupId] = useState(null);
   const [showCustomTicker, setShowCustomTicker] = useState(false);
   const [customTickerText, setCustomTickerText] = useState("");
 
@@ -75,9 +76,9 @@ const EditUrl = () => {
           },
           data: { id },
         });
-        setLoading(false);
         setUrls(urls.filter((url) => url.id !== id));
         fetchExistingUrls();
+        setLoading(false);
       } catch (error) {
         const message =
           error.response?.data?.message || "An unexpected error occurred.";
@@ -88,12 +89,51 @@ const EditUrl = () => {
   };
 
   const handleEdit = (url) => {
+    const groups = url.url_content.reduce((acc, content, index) => {
+      if (index === 0 || content.layout !== acc[acc.length - 1].layout) {
+        acc.push({
+          id: uuidv4(),
+          layout: content.layout || "single",
+          time: content.time || 60,
+          schedule: content.schedule || {
+            startTime: "",
+            endTime: "",
+            startDate: "",
+            endDate: "",
+            frequency: "none",
+            repeatInterval: 1,
+            repeatUntil: "",
+            weeklyDays: [],
+            monthlyRule: "",
+            displayMode: "exclusive",
+            priority: "medium",
+            timeWindows: [{ startTime: "", endTime: "" }],
+          },
+          items: [{
+            id: uuidv4(), // Add unique ID for each item
+            link: content.content || "",
+            file: content.file || null,
+            analyzeWithAI: content.analyzeWithAI || false,
+          }],
+        });
+      } else {
+        acc[acc.length - 1].items.push({
+          id: uuidv4(), // Add unique ID for each item
+          link: content.content || "",
+          file: content.file || null,
+          analyzeWithAI: content.analyzeWithAI || false,
+        });
+      }
+      return acc;
+    }, []);
+
     setCurrentEdit({
       ...url,
-      url_content: url.url_content.map((content) => ({
-        ...content,
-        layout: content.layout || "single",
-        schedule: content.schedule || {
+      groups: groups.length > 0 ? groups : [{
+        id: uuidv4(),
+        layout: "single",
+        time: 60,
+        schedule: {
           startTime: "",
           endTime: "",
           startDate: "",
@@ -105,10 +145,11 @@ const EditUrl = () => {
           monthlyRule: "",
           displayMode: "exclusive",
           priority: "medium",
+          timeWindows: [{ startTime: "", endTime: "" }],
         },
-      })),
+        items: [{ id: uuidv4(), link: "", file: null, analyzeWithAI: false }],
+      }],
     });
-    // Initialize custom ticker states
     setShowCustomTicker(!!url.custom_ticker);
     setCustomTickerText(url.custom_ticker || "");
     setIsEditing(true);
@@ -118,6 +159,7 @@ const EditUrl = () => {
     setIsEditing(false);
     setShowCustomTicker(false);
     setCustomTickerText("");
+    setCurrentEdit(null);
   };
 
   const handleUpdate = async () => {
@@ -131,83 +173,62 @@ const EditUrl = () => {
       }
 
       if (!currentEdit.Url_Name.trim()) {
-        alert("Please provide a valid URL Name.");
+        Swal.fire({
+          title: "Oops!",
+          text: "Please provide a Screen Name.",
+          icon: "warning",
+          confirmButtonText: "OK",
+        });
         setLoading(false);
         return;
       }
 
-      const updatedContent = currentEdit.url_content || [];
-      if (updatedContent.length === 0) {
-        alert("Please add at least one content link.");
-        setLoading(false);
-        return;
-      }
+      const links = currentEdit.groups.flatMap(group =>
+        group.items.map(item => ({
+          ...item,
+          layout: group.layout,
+          time: group.time,
+          schedule: group.schedule,
+        }))
+      );
 
-      for (const [index, content] of updatedContent.entries()) {
-        if (!content.content.trim()) {
-          alert(`Please provide a valid link for content item #${index + 1}`);
+      for (const [index, linkItem] of links.entries()) {
+        if (!linkItem.link && !linkItem.file) {
+          Swal.fire({
+            title: "Oops!",
+            text: `Please fill all the details for item ${index + 1}.`,
+            icon: "warning",
+            confirmButtonText: "OK",
+          });
           setLoading(false);
           return;
         }
-        if (!content.time || isNaN(content.time) || content.time <= 0) {
-          alert(`Please provide a valid time for content item #${index + 1}`);
-          setLoading(false);
-          return;
-        }
 
-        if (content.file) {
-          const allowedMimeTypes = [
-            "image/jpeg",
-            "image/jpg",
-            "image/png",
-            "image/gif",
-            "image/svg+xml",
-            "video/mp4",
-            "video/webm",
-            "video/quicktime",
-            "application/pdf",
-            "application/vnd.ms-powerpoint",
+        if (linkItem.file) {
+          const allowedTypes = [
+            "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
+            "video/mp4", "video/webm", "video/quicktime",
+            "application/pdf", "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           ];
-          const allowedExtensions = [
-            "mp4",
-            "webm",
-            "quicktime",
-            "jpeg",
-            "jpg",
-            "png",
-            "gif",
-            "svg",
-            "pdf",
-            "ppt",
-            "pptx",
-            "doc",
-            "docx",
-          ];
-          const file = content.file;
-          const fileExtension = file.name.split(".").pop().toLowerCase();
-          const fileSizeLimit = 2147483648; // 2GB
-
-          if (!allowedMimeTypes.includes(file.type)) {
-            alert(
-              `Unsupported file type: ${file.type}. Please select a valid file.`
-            );
+          if (!allowedTypes.includes(linkItem.file.type)) {
+            Swal.fire({
+              title: "Oops!",
+              text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, MOV, PDF, PPT, PPTX, DOC, DOCX.`,
+              icon: "warning",
+              confirmButtonText: "OK",
+            });
             setLoading(false);
             return;
           }
-          if (!allowedExtensions.includes(fileExtension)) {
-            alert(
-              `Unsupported file extension: .${fileExtension}. Please select a valid file.`
-            );
-            setLoading(false);
-            return;
-          }
-          if (file.size > fileSizeLimit) {
-            alert(
-              `File size exceeds the limit of 2GB. Please upload a smaller file.`
-            );
+          if (linkItem.file.size > 524288000) {
+            Swal.fire({
+              title: "Oops!",
+              text: `File size exceeds the limit of 500MB: ${linkItem.file.name}. Please upload a smaller file.`,
+              icon: "warning",
+              confirmButtonText: "OK",
+            });
             setLoading(false);
             return;
           }
@@ -218,59 +239,31 @@ const EditUrl = () => {
       formData.append("id", currentEdit.id);
       formData.append("Url_Name", currentEdit.Url_Name);
       formData.append("userId", userId);
-      // Append custom ticker
       formData.append("custom_ticker", showCustomTicker ? customTickerText : "");
 
-      updatedContent.forEach((content, idx) => {
-        formData.append(`links[${idx}][link]`, content.content || "");
-        formData.append(`links[${idx}][time]`, content.time || "");
-        formData.append(`links[${idx}][layout]`, content.layout || "single");
-        formData.append(
-          `links[${idx}][schedule][startTime]`,
-          content.schedule.startTime || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][endTime]`,
-          content.schedule.endTime || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][startDate]`,
-          content.schedule.startDate || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][endDate]`,
-          content.schedule.endDate || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][frequency]`,
-          content.schedule.frequency || "none"
-        );
-        formData.append(
-          `links[${idx}][schedule][repeatInterval]`,
-          content.schedule.repeatInterval || 1
-        );
-        formData.append(
-          `links[${idx}][schedule][repeatUntil]`,
-          content.schedule.repeatUntil || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][weeklyDays]`,
-          JSON.stringify(content.schedule.weeklyDays || [])
-        );
-        formData.append(
-          `links[${idx}][schedule][monthlyRule]`,
-          content.schedule.monthlyRule || ""
-        );
-        formData.append(
-          `links[${idx}][schedule][displayMode]`,
-          content.schedule.displayMode || "exclusive"
-        );
-        formData.append(
-          `links[${idx}][schedule][priority]`,
-          content.schedule.priority || "medium"
-        );
-        if (content.file) {
-          formData.append(`links[${idx}][file]`, content.file);
+      links.forEach((linkItem, index) => {
+        formData.append(`links[${index}][link]`, linkItem.link);
+        formData.append(`links[${index}][time]`, linkItem.time);
+        formData.append(`links[${index}][analyzeWithAI]`, linkItem.analyzeWithAI);
+        formData.append(`links[${index}][layout]`, linkItem.layout);
+        formData.append(`links[${index}][schedule][startDate]`, linkItem.schedule.startDate);
+        formData.append(`links[${index}][schedule][endDate]`, linkItem.schedule.endDate);
+        formData.append(`links[${index}][schedule][frequency]`, linkItem.schedule.frequency);
+        formData.append(`links[${index}][schedule][repeatInterval]`, linkItem.schedule.repeatInterval);
+        formData.append(`links[${index}][schedule][repeatUntil]`, linkItem.schedule.repeatUntil);
+        formData.append(`links[${index}][schedule][weeklyDays]`, JSON.stringify(linkItem.schedule.weeklyDays));
+        formData.append(`links[${index}][schedule][monthlyRule]`, linkItem.schedule.monthlyRule);
+        formData.append(`links[${index}][schedule][displayMode]`, linkItem.schedule.displayMode);
+        formData.append(`links[${index}][schedule][priority]`, linkItem.schedule.priority);
+        if (linkItem.schedule.timeWindows) {
+          linkItem.schedule.timeWindows.forEach((tw, twIndex) => {
+            formData.append(`links[${index}][schedule][timeWindows][${twIndex}][startTime]`, tw.startTime);
+            formData.append(`links[${index}][schedule][timeWindows][${twIndex}][endTime]`, tw.endTime);
+          });
+        }
+        if (linkItem.file) {
+          formData.append(`links[${index}][file]`, linkItem.file);
+          formData.append(`links[${index}][fileName]`, linkItem.file.name);
         }
       });
 
@@ -281,25 +274,27 @@ const EditUrl = () => {
         },
       });
 
-      setLoading(false);
-      setUrls(
-        urls.map((url) =>
-          url.id === currentEdit.id
-            ? { ...currentEdit, custom_ticker: showCustomTicker ? customTickerText : "" }
-            : url
-        )
-      );
+      setUrls(urls.map(url =>
+        url.id === currentEdit.id
+          ? { ...currentEdit, custom_ticker: showCustomTicker ? customTickerText : "" }
+          : url
+      ));
       setIsEditing(false);
       setCurrentEdit(null);
       setShowCustomTicker(false);
       setCustomTickerText("");
+      setLoading(false);
       setTimeout(() => {
         window.location.reload();
       }, 100);
     } catch (error) {
-      const message =
-        error.response?.data?.message || "An unexpected error occurred.";
-      alert(message);
+      const message = error.response?.data?.message || "An unexpected error occurred.";
+      Swal.fire({
+        title: "Error!",
+        text: message,
+        icon: "error",
+        confirmButtonText: "OK",
+      });
       setLoading(false);
     }
   };
@@ -309,27 +304,15 @@ const EditUrl = () => {
     setCurrentEdit({ ...currentEdit, [name]: value });
   };
 
-  const handleContentChange = (idx, field, value) => {
-    const updatedContent = [...currentEdit.url_content];
-    if (field === "schedule") {
-      updatedContent[idx].schedule = { ...updatedContent[idx].schedule, ...value };
-    } else {
-      updatedContent[idx][field] =
-        field === "time" ? parseInt(value, 10) : value;
-    }
-    setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-  };
-  
-
-  const handleAddContent = () => {
+  const addNewGroup = () => {
     setCurrentEdit({
       ...currentEdit,
-      url_content: [
-        ...currentEdit.url_content,
+      groups: [
+        ...currentEdit.groups,
         {
-          content: "",
-          time: 60,
+          id: uuidv4(),
           layout: "single",
+          time: 60,
           schedule: {
             startTime: "",
             endTime: "",
@@ -342,116 +325,375 @@ const EditUrl = () => {
             monthlyRule: "",
             displayMode: "exclusive",
             priority: "medium",
+            timeWindows: [{ startTime: "", endTime: "" }],
           },
+          items: [{ id: uuidv4(), link: "", file: null, analyzeWithAI: false }],
         },
       ],
     });
   };
 
-  const handleRemoveContent = (idx) => {
-    Swal.fire({
-      title: "Are you sure?",
-      text: "This content will be permanently removed. This action cannot be undone.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, remove it!",
-      cancelButtonText: "Cancel",
-      reverseButtons: true,
-    }).then((result) => {
-      if (result.isConfirmed) {
-        const updatedContent = currentEdit.url_content.filter(
-          (_, i) => i !== idx
-        );
-        setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-        Swal.fire(
-          "Removed!",
-          "The content has been removed successfully.",
-          "success"
-        );
-      } else {
-        Swal.fire("Cancelled", "The content was not removed.", "info");
-      }
+  const deleteGroup = (groupId) => {
+    if (currentEdit.groups.length === 1) {
+      Swal.fire({
+        title: "Oops!",
+        text: "Cannot delete the last group.",
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.filter(group => group.id !== groupId),
     });
   };
 
-  const handleFileUpload = (idx, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const updatedContent = [...currentEdit.url_content];
-      const allowedTypes = [
-        "image/jpeg",
-        "image/jpg",
-        "image/png",
-        "image/gif",
-        "image/svg+xml",
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-        "application/pdf",
-        "application/vnd.ms-powerpoint",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/msword",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      ];
-      if (!allowedTypes.includes(file.type)) {
-        alert(
-          "Unsupported file type. Please upload a valid image, video, or document."
-        );
-        return;
-      }
-      const maxSize = 524288000; // 500 MB
-      if (file.size > maxSize) {
-        alert(
-          "File size exceeds the limit of 500 MB. Please upload a smaller file."
-        );
-        return;
-      }
-      if (file.type.startsWith("video/")) {
-        const videoElement = document.createElement("video");
-        videoElement.src = URL.createObjectURL(file);
-        videoElement.onloadedmetadata = () => {
-          const duration = Math.ceil(videoElement.duration);
-          const maxVideoDuration = 1200; // 20 minutes
-          if (duration > maxVideoDuration) {
-            alert(
-              `Video exceeds the maximum duration of ${maxVideoDuration} seconds.`
-            );
-            return;
+  const moveGroupUp = (index) => {
+    if (index === 0) return;
+    const newGroups = [...currentEdit.groups];
+    [newGroups[index], newGroups[index - 1]] = [newGroups[index - 1], newGroups[index]];
+    setCurrentEdit({ ...currentEdit, groups: newGroups });
+  };
+
+  const moveGroupDown = (index) => {
+    if (index === currentEdit.groups.length - 1) return;
+    const newGroups = [...currentEdit.groups];
+    [newGroups[index], newGroups[index + 1]] = [newGroups[index + 1], newGroups[index]];
+    setCurrentEdit({ ...currentEdit, groups: newGroups });
+  };
+
+  const moveItemUp = (groupId, itemIndex) => {
+    if (itemIndex === 0) return;
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          [newItems[itemIndex], newItems[itemIndex - 1]] = [newItems[itemIndex - 1], newItems[itemIndex]];
+          return { ...group, items: newItems };
+        }
+        return group;
+      }),
+    });
+  };
+
+  const moveItemDown = (groupId, itemIndex) => {
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId && itemIndex < group.items.length - 1) {
+          const newItems = [...group.items];
+          [newItems[itemIndex], newItems[itemIndex + 1]] = [newItems[itemIndex + 1], newItems[itemIndex]];
+          return { ...group, items: newItems };
+        }
+        return group;
+      }),
+    });
+  };
+
+  const deleteItem = (groupId, itemId) => {
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          if (group.items.length === 1) {
+            Swal.fire({
+              title: "Oops!",
+              text: "Cannot delete the last item in a group.",
+              icon: "warning",
+              confirmButtonText: "OK",
+            });
+            return group;
           }
-          updatedContent[idx] = {
-            ...updatedContent[idx],
-            file,
-            content: videoElement.src,
-            time: duration || 60,
+          const layout = layoutOptions.find(l => l.id === group.layout);
+          if (group.items.length <= layout.itemCount) {
+            Swal.fire({
+              title: "Oops!",
+              text: `Cannot delete item. The layout '${layout.name}' requires ${layout.itemCount} items.`,
+              icon: "warning",
+              confirmButtonText: "OK",
+            });
+            return group;
+          }
+          return {
+            ...group,
+            items: group.items.filter(item => item.id !== itemId),
           };
-          setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-        };
-      } else {
-        const fileURL = URL.createObjectURL(file);
-        updatedContent[idx] = {
-          ...updatedContent[idx],
-          file,
-          content: fileURL,
-          time: 60, // Default time for non-video files
-        };
-        setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-      }
+        }
+        return group;
+      }),
+    });
+  };
+
+  const handleTimeChange = (groupId, value) => {
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group =>
+        group.id === groupId ? { ...group, time: parseInt(value, 10) || 60 } : group
+      ),
+    });
+  };
+
+  const handleFileUpload = (groupId, itemIndex, e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const allowedMimeTypes = [
+      "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
+      "video/mp4", "video/webm", "video/quicktime",
+      "application/pdf", "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    const allowedExtensions = [
+      "mp4", "webm", "mov", "jpeg", "jpg", "png", "gif", "svg",
+      "pdf", "ppt", "pptx", "doc", "docx",
+    ];
+    const maxFileSize = 524288000;
+
+    const fileExtension = file.name.split(".").pop().toLowerCase();
+    const isValidMime = allowedMimeTypes.includes(file.type);
+    const isValidExtension = allowedExtensions.includes(fileExtension);
+    const isValidSize = file.size <= maxFileSize;
+
+    if (!isValidMime) {
+      Swal.fire({
+        title: "Oops!",
+        text: `Unsupported file type: ${file.type}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
     }
+    if (!isValidExtension) {
+      Swal.fire({
+        title: "Oops!",
+        text: `Unsupported file extension: .${fileExtension}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+    if (!isValidSize) {
+      Swal.fire({
+        title: "Oops!",
+        text: `File too large: ${file.name}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          newItems[itemIndex] = {
+            ...newItems[itemIndex],
+            link: url,
+            file: file,
+          };
+          if (file.type.startsWith("video/")) {
+            const video = document.createElement("video");
+            video.src = url;
+            video.onloadedmetadata = () => {
+              const durationInSeconds = Math.floor(video.duration);
+              setCurrentEdit(prev => ({
+                ...prev,
+                groups: prev.groups.map(g =>
+                  g.id === groupId ? { ...g, time: durationInSeconds } : g
+                ),
+              }));
+            };
+          }
+          return { ...group, items: newItems };
+        }
+        return group;
+      }),
+    });
+  };
+
+  const handleFileDrop = (groupId, itemIndex, droppedFiles) => {
+    const file = droppedFiles[0];
+    if (!file) return;
+
+    const allowedMimeTypes = [
+      "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
+      "video/mp4", "video/webm", "video/quicktime",
+      "application/pdf", "application/vnd.ms-powerpoint",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ];
+    const allowedExtensions = [
+      "mp4", "webm", "mov", "jpeg", "jpg", "png", "gif", "svg",
+      "pdf", "ppt", "pptx", "doc", "docx",
+    ];
+    const maxFileSize = 524288000;
+
+    const fileExtension = file.name.split(".").pop().toLowerCase();
+    const isValidMime = allowedMimeTypes.includes(file.type);
+    const isValidExtension = allowedExtensions.includes(fileExtension);
+    const isValidSize = file.size <= maxFileSize;
+
+    if (!isValidMime) {
+      Swal.fire({
+        title: "Oops!",
+        text: `Unsupported file type: ${file.type}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+    if (!isValidExtension) {
+      Swal.fire({
+        title: "Oops!",
+        text: `Unsupported file extension: .${fileExtension}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+    if (!isValidSize) {
+      Swal.fire({
+        title: "Oops!",
+        text: `File too large: ${file.name}.`,
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+
+    const url = URL.createObjectURL(file);
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          newItems[itemIndex] = {
+            ...newItems[itemIndex],
+            link: url,
+            file: file,
+          };
+          if (file.type.startsWith("video/")) {
+            const video = document.createElement("video");
+            video.src = url;
+            video.onloadedmetadata = () => {
+              const durationInSeconds = Math.floor(video.duration);
+              setCurrentEdit(prev => ({
+                ...prev,
+                groups: prev.groups.map(g =>
+                  g.id === groupId ? { ...g, time: durationInSeconds } : g
+                ),
+              }));
+            };
+          }
+          return { ...group, items: newItems };
+        }
+        return group;
+      }),
+    });
+  };
+
+  const toggleAnalyzeWithAI = (groupId, itemIndex) => {
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          const newItems = [...group.items];
+          newItems[itemIndex].analyzeWithAI = !newItems[itemIndex].analyzeWithAI;
+          return { ...group, items: newItems };
+        }
+        return group;
+      }),
+    });
+  };
+
+  const updateSchedule = (groupId, field, value) => {
+    setCurrentEdit({
+      ...currentEdit,
+      groups: currentEdit.groups.map(group => {
+        if (group.id === groupId) {
+          if (field === "timeWindows") {
+            return { ...group, schedule: { ...group.schedule, timeWindows: value } };
+          } else {
+            return { ...group, schedule: { ...group.schedule, [field]: value } };
+          }
+        }
+        return group;
+      }),
+    });
+  };
+
+  const openLayoutModal = (groupId) => {
+    setCurrentGroupId(groupId);
+    setIsLayoutModalOpen(true);
+  };
+
+  const closeLayoutModal = () => {
+    setIsLayoutModalOpen(false);
+    setCurrentGroupId(null);
+  };
+
+  const selectLayout = (layoutId) => {
+    if (currentGroupId) {
+      const layout = layoutOptions.find(l => l.id === layoutId);
+      const requiredItems = layout.itemCount;
+      setCurrentEdit({
+        ...currentEdit,
+        groups: currentEdit.groups.map(group => {
+          if (group.id === currentGroupId) {
+            let newItems = [...group.items];
+            if (newItems.length < requiredItems) {
+              const newItemTemplate = {
+                id: uuidv4(),
+                link: "",
+                file: null,
+                analyzeWithAI: false,
+              };
+              while (newItems.length < requiredItems) {
+                newItems.push({ ...newItemTemplate });
+              }
+            } else if (newItems.length > requiredItems) {
+              newItems = newItems.slice(0, requiredItems);
+            }
+            return { ...group, layout: layoutId, items: newItems };
+          }
+          return group;
+        }),
+      });
+      closeLayoutModal();
+    }
+  };
+
+  const openSchedulerModal = (groupId) => {
+    setCurrentSchedulerGroupId(groupId);
+    setIsSchedulerModalOpen(true);
+  };
+
+  const closeSchedulerModal = () => {
+    setIsSchedulerModalOpen(false);
+    setCurrentSchedulerGroupId(null);
   };
 
   const handlePreview = (content) => {
     if (content) {
-      window.open(content, "_blank");
+      const fullUrl =
+        content.startsWith("http://") ||
+        content.startsWith("https://") ||
+        content.startsWith("blob:")
+          ? content
+          : `${apiBaseUrl}/${content}`;
+      window.open(fullUrl, "_blank");
     } else {
-      alert("No content to preview");
-    }
-  };
-
-  const handleLinkPreview = (content) => {
-    if (content) {
-      window.open(content, "_blank");
-    } else {
-      alert("No content to preview");
+      Swal.fire({
+        title: "Oops!",
+        text: "No content to preview",
+        icon: "warning",
+        confirmButtonText: "OK",
+      });
     }
   };
 
@@ -489,7 +731,12 @@ const EditUrl = () => {
       setUrlCount(res.data.length);
     } catch (error) {
       const message = error.response?.data?.message || "Failed to fetch URLs.";
-      alert(message);
+      Swal.fire({
+        title: "Error!",
+        text: message,
+        icon: "error",
+        confirmButtonText: "OK",
+      });
     }
   };
 
@@ -502,28 +749,8 @@ const EditUrl = () => {
         confirmButtonText: "OK",
       });
     } else {
-      navigate(`/home`);
+      navigate("/home");
     }
-  };
-
-  const moveContentUp = (index) => {
-    if (index === 0) return;
-    const updatedContent = [...currentEdit.url_content];
-    [updatedContent[index], updatedContent[index - 1]] = [
-      updatedContent[index - 1],
-      updatedContent[index],
-    ];
-    setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-  };
-
-  const moveContentDown = (index) => {
-    if (index === currentEdit.url_content.length - 1) return;
-    const updatedContent = [...currentEdit.url_content];
-    [updatedContent[index], updatedContent[index + 1]] = [
-      updatedContent[index + 1],
-      updatedContent[index],
-    ];
-    setCurrentEdit({ ...currentEdit, url_content: updatedContent });
   };
 
   const handleToggle = async (id, currentStatus) => {
@@ -552,47 +779,16 @@ const EditUrl = () => {
           );
         }
       } catch (error) {
-        Swal.fire(
-          "Error",
-          error.response?.data?.message || "Failed to update status",
-          "error"
-        );
+        Swal.fire({
+          title: "Error!",
+          text: error.response?.data?.message || "Failed to update status",
+          icon: "error",
+          confirmButtonText: "OK",
+        });
       }
     }
   };
 
-  // Layout Modal Handlers
-  const openLayoutModal = (index) => {
-    setCurrentLayoutIndex(index);
-    setIsLayoutModalOpen(true);
-  };
-
-  const closeLayoutModal = () => {
-    setIsLayoutModalOpen(false);
-    setCurrentLayoutIndex(null);
-  };
-
-  const selectLayout = (layoutId) => {
-    if (currentLayoutIndex !== null) {
-      const updatedContent = [...currentEdit.url_content];
-      updatedContent[currentLayoutIndex].layout = layoutId;
-      setCurrentEdit({ ...currentEdit, url_content: updatedContent });
-      closeLayoutModal();
-    }
-  };
-
-  // Scheduler Modal Handlers
-  const openSchedulerModal = (index) => {
-    setCurrentSchedulerIndex(index);
-    setIsSchedulerModalOpen(true);
-  };
-
-  const closeSchedulerModal = () => {
-    setIsSchedulerModalOpen(false);
-    setCurrentSchedulerIndex(null);
-  };
-
-  // Layout Preview Rendering
   const renderLayoutPreview = (layoutId, isSelected = false) => {
     const layout = layoutOptions.find((l) => l.id === layoutId);
     if (!layout) return null;
@@ -632,13 +828,13 @@ const EditUrl = () => {
         >
           <div className="flex flex-col items-center">
             <div className="loader"></div>
-            <p className="mt-6 text-loading">Loading, please wait...</p>
+            <p className="mt-6 text-white text-lg">Loading, please wait...</p>
           </div>
         </div>
       )}
       <div
         style={{ fontFamily: "Outfit" }}
-        className="p-2 max-w-[50%] mx-auto rounded-lg h-[calc(100vh-80px)] overflow-auto bg-[#f1f1f1] z-50"
+        className="p-6 max-w-[50%] mx-auto rounded-lg h-[calc(100vh-80px)] overflow-auto bg-[#f1f1f1] z-50"
       >
         {isEditing ? (
           <div>
@@ -655,40 +851,33 @@ const EditUrl = () => {
               Edit your Screen details
             </p>
 
-            <div className="flex flex-col items-center p-4 rounded-lg space-x-4 bg-[#f1f1f1]">
-              <div className="w-full sm:w-1/2 text-sm flex flex-col pb-4 items-center">
-                <label className="text-xs text-black font-semibold">
-                  Screen Name
-                </label>
-                <div className="flex items-center w-full">
-                  <input
-                    type="text"
-                    name="Url_Name"
-                    value={currentEdit?.Url_Name || ""}
-                    onChange={handleInputChange}
-                    placeholder="Enter Name"
-                    className="border p-2 rounded bg-white text-sm w-full font-semibold text-center"
-                  />
-                  <div className="flex flex-col justify-center items-center ml-4">
-                    <span className="text-sm mb-1 text-gray-700">
-                      Custom Ticker
-                    </span>
-                    <button
-                      onClick={() => setShowCustomTicker(!showCustomTicker)}
-                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${
-                        showCustomTicker ? "bg-green-500" : "bg-gray-400"
+            <div className="flex flex-col p-4 rounded-lg space-y-4 bg-[#f1f1f1]">
+              <div className="flex items-center mb-1">
+                <input
+                  type="text"
+                  name="Url_Name"
+                  value={currentEdit?.Url_Name || ""}
+                  onChange={handleInputChange}
+                  placeholder="Screen Name"
+                  className="border-2 p-3 rounded-md bg-white w-full text-center font-bold text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <div className="flex flex-col justify-center items-center ml-4">
+                  <span className="text-sm mb-1 text-gray-700">Custom Ticker</span>
+                  <button
+                    onClick={() => setShowCustomTicker(!showCustomTicker)}
+                    className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${
+                      showCustomTicker ? "bg-green-500" : "bg-gray-400"
+                    }`}
+                    aria-label={`Toggle custom ticker ${
+                      showCustomTicker ? "off" : "on"
+                    }`}
+                  >
+                    <div
+                      className={`w-4 h-4 bg-white rounded-full transform transition-transform duration-300 ${
+                        showCustomTicker ? "translate-x-6" : ""
                       }`}
-                      aria-label={`Toggle custom ticker ${
-                        showCustomTicker ? "off" : "on"
-                      }`}
-                    >
-                      <div
-                        className={`w-4 h-4 bg-white rounded-full transform transition-transform duration-300 ${
-                          showCustomTicker ? "translate-x-6" : ""
-                        }`}
-                      ></div>
-                    </button>
-                  </div>
+                    ></div>
+                  </button>
                 </div>
               </div>
               <AnimatePresence>
@@ -698,7 +887,7 @@ const EditUrl = () => {
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
                     transition={{ duration: 0.3 }}
-                    className="w-full sm:w-1/2 mb-4"
+                    className="w-full"
                   >
                     <input
                       type="text"
@@ -711,166 +900,332 @@ const EditUrl = () => {
                 )}
               </AnimatePresence>
 
-              <AnimatePresence>
-                {currentEdit?.url_content?.map((content, idx) => (
-                  <motion.div
-                    key={idx}
-                    layout
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    transition={{ type: "spring", stiffness: 300, damping: 20 }}
-                    className="mb-3 border border-gray-300 rounded-2xl bg-white p-4 flex items-center z-20"
-                    style={{
-                      alignItems: "center",
-                      marginLeft: "1vw",
-                      height: "10vh",
-                    }}
-                  >
-                    <div className="flex items-center space-x-2 flex-grow">
-                      <label className="flex items-center px-3 py-2 bg-black text-white text-sm rounded cursor-pointer">
-                        <AiOutlineUpload className="mr-2" />
-                        Upload
-                        <input
-                          type="file"
-                          className="hidden"
-                          accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,video/mkv,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                          onChange={(e) => handleFileUpload(idx, e)}
-                        />
-                      </label>
-                      <input
-                        type="text"
-                        value={content.content}
-                        onChange={(e) =>
-                          handleContentChange(idx, "content", e.target.value)
-                        }
-                        placeholder="Content"
-                        className="px-2 py-[1.25vh] border rounded-l-md text-sm bg-[#f1f1f1] w-[17vw]"
-                      />
-                    </div>
-
-                    <div style={{ position: "relative", marginRight: "1vw" }}>
-                      <input
-                        type="number"
-                        value={
-                          content.time !== undefined && content.time !== null
-                            ? content.time
-                            : ""
-                        }
-                        onChange={(e) =>
-                          handleContentChange(idx, "time", e.target.value || "")
-                        }
-                        placeholder="Time"
-                        className="w-[5vw] p-2 border border-gray-300 rounded-r-xl text-center"
-                        required
-                        min="1"
-                        step="1"
-                      />
-                      <span
-                        className="time"
-                        style={{
-                          position: "absolute",
-                          top: "0",
-                          right: "0",
-                          background: "black",
-                          height: "100%",
-                          borderRadius: "0px 0.3125vw 0.3125vw 0px",
-                          textAlign: "center",
-                          lineHeight: "40px",
-                          color: "white",
-                          fontSize: "14px",
-                          paddingRight: "6px",
-                          paddingLeft: "6px",
-                        }}
-                      >
-                        Sec
-                      </span>
-                    </div>
-
-                    <div className="mr-2">
-                      <button
-                        onClick={() => openLayoutModal(idx)}
-                        className="flex items-center justify-center p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50"
-                        style={{ height: "40px", width: "70px" }}
-                      >
-                        <BiLayout className="mr-1" />
-                        <span className="text-sm">
-                          {getLayoutName(content.layout).split(" ")[0]}
-                        </span>
-                      </button>
-                    </div>
-
-                    <div className="mr-2">
-                      <button
-                        onClick={() => openSchedulerModal(idx)}
-                        className={`flex items-center justify-center p-2 border rounded-md hover:bg-gray-50 ${
-                          content.schedule?.startTime || content.schedule?.startDate
-                            ? "bg-blue-100 text-blue-700 border-blue-300"
-                            : "bg-gray-200 text-gray-700 border-gray-300"
-                        }`}
-                        style={{ height: "40px", width: "80px" }}
-                      >
-                        <IoTimeOutline className="mr-1" />
-                        <span className="text-sm">
-                          {content.schedule?.startTime ||
-                          content.schedule?.startDate
-                            ? "Edit"
-                            : "Add"}
-                        </span>
-                      </button>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <button
-                        className="w-[45px] h-[45px] flex items-center justify-center rounded-xl bg-gray-200"
-                        onClick={() => {
-                          if (!content.content || content.content.trim() === "") {
-                            alert("No content to preview");
-                            return;
-                          }
-                          const fullUrl =
-                            content.content.startsWith("http://") ||
-                            content.content.startsWith("https://") ||
-                            content.content.startsWith("blob:")
-                              ? content.content
-                              : `${apiBaseUrl}/${content.content}`;
-                          handlePreview(fullUrl);
-                        }}
-                      >
-                        <RiEyeFill />
-                      </button>
-                      <button
-                        className="w-[45px] h-[45px] flex items-center justify-center rounded-xl bg-red-500 text-white"
-                        onClick={() => handleRemoveContent(idx)}
-                      >
-                        <RiDeleteBin6Line />
-                      </button>
-                      <button
-                        className="w-[45px] h-[45px] flex items-center justify-center rounded-xl bg-[#348824] text-white"
-                        onClick={() => handleAddContent(idx)}
-                      >
-                        <FiPlusCircle />
-                      </button>
-                      <div className="flex">
-                        <button
-                          className="w-[45px] h-[45px] flex items-center justify-center bg-[#F1F1F1] border border-gray-300 rounded-l-xl"
-                          onClick={() => moveContentUp(idx)}
-                          disabled={idx === 0}
-                        >
-                          <AiOutlineArrowUp />
-                        </button>
-                        <button
-                          className="w-[45px] h-[45px] flex items-center justify-center bg-white border border-gray-300 rounded-r-xl"
-                          onClick={() => moveContentDown(idx)}
-                          disabled={idx === currentEdit?.url_content?.length - 1}
-                        >
-                          <AiOutlineArrowDown />
-                        </button>
+              <div className="scrollable-container w-full" style={{ maxHeight: "380px", overflowY: "auto" }}>
+                <AnimatePresence>
+                  {currentEdit?.groups?.map((group, groupIndex) => (
+                    <motion.div
+                      key={group.id}
+                      layout
+                      initial={{ opacity: 0, y: -10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 10 }}
+                      transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                      className="mb-5 border border-gray-300 rounded-2xl bg-white p-4"
+                      style={{ width: "600px", position: "relative", zIndex: 1 }}
+                    >
+                      <div className="flex items-center justify-between mb-4">
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => openLayoutModal(group.id)}
+                            className="flex items-center justify-center p-2 border border-gray-300 rounded-md bg-white hover:bg-gray-50 mr-4"
+                            style={{ height: "40px", width: "100px" }}
+                          >
+                            <BiLayout className="mr-1" />
+                            <span className="text-sm">{getLayoutName(group.layout)}</span>
+                          </button>
+                        </div>
+                        <div className="flex items-center">
+                          <button
+                            onClick={addNewGroup}
+                            className="p-2 bg-green-500 text-white rounded-xl mr-2"
+                            style={{
+                              width: "75px",
+                              height: "40px",
+                              fontSize: "18px",
+                              display: "flex",
+                              justifyContent: "center",
+                              backgroundColor: "#348824",
+                            }}
+                          >
+                            <FiPlusCircle
+                              style={{
+                                width: "16px",
+                                height: "16px",
+                                marginRight: "5px",
+                                marginTop: "4px",
+                              }}
+                            />
+                            Add
+                          </button>
+                          {currentEdit.groups.length > 1 && (
+                            <>
+                              <button
+                                onClick={() => moveGroupUp(groupIndex)}
+                                style={{
+                                  background: "#F1F1F1",
+                                  width: "45px",
+                                  height: "45px",
+                                  border: "1px solid",
+                                  borderRadius: "10px 0px 0px 10px",
+                                  borderColor: "#E1E1E1",
+                                  justifyItems: "center",
+                                }}
+                                disabled={groupIndex === 0}
+                              >
+                                <AiOutlineArrowUp />
+                              </button>
+                              <button
+                                onClick={() => moveGroupDown(groupIndex)}
+                                style={{
+                                  background: "#FFFFFF",
+                                  width: "45px",
+                                  height: "45px",
+                                  border: "1px solid",
+                                  borderRadius: "0px 10px 10px 0px",
+                                  borderColor: "#E1E1E1",
+                                  marginRight: "10px",
+                                  justifyItems: "center",
+                                }}
+                                disabled={groupIndex === currentEdit.groups.length - 1}
+                              >
+                                <AiOutlineArrowDown />
+                              </button>
+                              <button
+                                onClick={() => deleteGroup(group.id)}
+                                className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600"
+                                style={{
+                                  width: "45px",
+                                  height: "41px",
+                                  border: "1px solid",
+                                  borderRadius: "10px",
+                                  marginRight: "10px",
+                                  justifyItems: "center",
+                                }}
+                              >
+                                <RiDeleteBin6Line />
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+                      <div className="flex flex-col md:flex-row items-end gap-3 mb-3">
+                        <div className="items-center">
+                          <p
+                            style={{
+                              fontFamily: "Outfit",
+                              fontWeight: "500",
+                              color: "#6F7C8E",
+                              lineHeight: "17.64px",
+                              marginBottom: "7px",
+                            }}
+                          >
+                            Enter Time
+                          </p>
+                          <div className="time-input-group" style={{ position: "relative" }}>
+                            <IoTimeOutline
+                              style={{
+                                position: "absolute",
+                                top: "13px",
+                                left: "7px",
+                                color: "#6F7C8E",
+                              }}
+                            />
+                            <div
+                              style={{
+                                width: "1px",
+                                height: "60%",
+                                backgroundColor: "#E1E1E1",
+                                marginRight: "8px",
+                              }}
+                            ></div>
+                            <input
+                              type="number"
+                              className="w-16 p-2 border border-gray-300 rounded-md text-center"
+                              value={group.time}
+                              onChange={(e) => handleTimeChange(group.id, e.target.value)}
+                              placeholder="Time"
+                              required
+                              style={{ width: "112px", paddingLeft: "28px", paddingRight: "35px" }}
+                            />
+                            <span
+                              className="time"
+                              style={{
+                                position: "absolute",
+                                top: "0",
+                                width: "auto",
+                                right: "0",
+                                background: "black",
+                                height: "100%",
+                                borderRadius: "0px 5px 5px 0px",
+                                textAlign: "center",
+                                lineHeight: "40px",
+                                color: "white",
+                                fontSize: "14px",
+                                paddingRight: "6px",
+                                paddingLeft: "6px",
+                              }}
+                            >
+                              Sec
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                          <button
+                            onClick={() => openSchedulerModal(group.id)}
+                            className={`p-2 rounded-lg text-sm text-center leading-tight ${
+                              group.schedule?.startTime || group.schedule?.startDate
+                                ? "bg-blue-100 text-blue-700 border border-blue-300"
+                                : "bg-gray-200 text-gray-700"
+                            }`}
+                            style={{ width: "80px", height: "45px" }}
+                          >
+                            {group.schedule?.startTime || group.schedule?.startDate ? (
+                              <>
+                                Edit<br />Schedule
+                              </>
+                            ) : (
+                              <>
+                                Add<br />Schedule
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                      {group.items.map((item, itemIndex) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center mb-3"
+                          style={{
+                            borderBottom:
+                              itemIndex < group.items.length - 1 ? "1px solid #eee" : "none",
+                            paddingBottom:
+                              itemIndex < group.items.length - 1 ? "10px" : "0",
+                          }}
+                        >
+                          <div className="flex-grow">
+                            <div
+                              className="relative flex items-center border-gray-300 rounded-md"
+                              style={{ width: "440px", paddingRight: "0px" }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const droppedFiles = Array.from(e.dataTransfer.files);
+                                handleFileDrop(group.id, itemIndex, droppedFiles);
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className="h-16 px-4 text-white rounded-l-lg flex items-center justify-center hover:bg-blue-700"
+                                onClick={() =>
+                                  document
+                                    .getElementById(`file-input-${group.id}-${item.id}`)
+                                    .click()
+                                }
+                                style={{ height: "66px", backgroundColor: "#363736" }}
+                              >
+                                <FaFileArrowUp className="text-lg" style={{ paddingLeft: "6px" }} />
+                                <p style={{ fontFamily: "Outfit", paddingLeft: "6px", paddingRight: "6px" }}>
+                                  Upload
+                                </p>
+                              </button>
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                onChange={(e) => handleFileUpload(group.id, itemIndex, e)}
+                                id={`file-input-${group.id}-${item.id}`}
+                              />
+                              <input
+                                type="text"
+                                className="w-full p-3 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
+                                style={{
+                                  height: "66px",
+                                  width: "70%",
+                                  backgroundColor: "#F7F7FF",
+                                  paddingLeft: "12px",
+                                  fontFamily: "Outfit",
+                                  color: item.file ? "green" : "black",
+                                }}
+                                placeholder="Embedded Link / Image / Video or Upload File"
+                                value={item.file ? item.file.name : item.link}
+                                onChange={(e) => {
+                                  setCurrentEdit({
+                                    ...currentEdit,
+                                    groups: currentEdit.groups.map(g => {
+                                      if (g.id === group.id) {
+                                        const newItems = [...g.items];
+                                        newItems[itemIndex].link = e.target.value;
+                                        newItems[itemIndex].file = null;
+                                        return { ...g, items: newItems };
+                                      }
+                                      return g;
+                                    }),
+                                  });
+                                }}
+                              />
+                              {item.file?.type === "application/pdf" && (
+                                <div className="flex justify-center mt-2">
+                                  <label className="flex flex-col items-center cursor-pointer text-center">
+                                    <input
+                                      type="checkbox"
+                                      className="sr-only peer"
+                                      checked={item.analyzeWithAI}
+                                      onChange={() => toggleAnalyzeWithAI(group.id, itemIndex)}
+                                    />
+                                    <div className="relative w-11 h-6 bg-gray-200 rounded-full peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                                    <span className="mt-2 text-sm font-medium text-gray-700 leading-tight">
+                                      Summarize<br />with AI
+                                    </span>
+                                  </label>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {group.items.length > 1 && (
+                            <div className="flex items-center ml-2">
+                              <button
+                                onClick={() => moveItemUp(group.id, itemIndex)}
+                                style={{
+                                  background: "#F1F1F1",
+                                  width: "35px",
+                                  height: "35px",
+                                  border: "1px solid",
+                                  borderRadius: "8px 0px 0px 8px",
+                                  borderColor: "#E1E1E1",
+                                  justifyItems: "center",
+                                }}
+                                disabled={itemIndex === 0}
+                              >
+                                <AiOutlineArrowUp />
+                              </button>
+                              <button
+                                onClick={() => moveItemDown(group.id, itemIndex)}
+                                style={{
+                                  background: "#FFFFFF",
+                                  width: "35px",
+                                  height: "35px",
+                                  border: "1px solid",
+                                  borderRadius: "0px 8px 8px 0px",
+                                  borderColor: "#E1E1E1",
+                                  justifyItems: "center",
+                                }}
+                                disabled={itemIndex === group.items.length - 1}
+                              >
+                                <AiOutlineArrowDown />
+                              </button>
+                              <button
+                                onClick={() => deleteItem(group.id, item.id)}
+                                className="p-2 bg-red-500 text-white rounded-full hover:bg-red-600 ml-2"
+                                style={{
+                                  width: "35px",
+                                  height: "35px",
+                                  border: "1px solid",
+                                  borderRadius: "8px",
+                                  justifyItems: "center",
+                                }}
+                              >
+                                <RiDeleteBin6Line />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
             </div>
             <div className="flex item-center justify-center">
               <button
@@ -943,7 +1298,7 @@ const EditUrl = () => {
                   <div className="flex space-x-2 z-20">
                     <button
                       className="w-7 h-7 flex items-center justify-center rounded-md bg-black text-white"
-                      onClick={() => handleLinkPreview(url.previewUrl)}
+                      onClick={() => handlePreview(url.previewUrl)}
                     >
                       <RiEyeFill />
                     </button>
@@ -1052,11 +1407,12 @@ const EditUrl = () => {
                     setScheduledAt(null);
                     setExpiresAt(null);
                   } catch (error) {
-                    Swal.fire(
-                      "Error",
-                      error.response?.data?.message || "Failed to update status",
-                      "error"
-                    );
+                    Swal.fire({
+                      title: "Error!",
+                      text: error.response?.data?.message || "Failed to update status",
+                      icon: "error",
+                      confirmButtonText: "OK",
+                    });
                   }
                 }}
               >
@@ -1077,8 +1433,7 @@ const EditUrl = () => {
                   key={layout.id}
                   onClick={() => selectLayout(layout.id)}
                   className={`p-3 border rounded-md hover:bg-gray-50 ${
-                    currentEdit.url_content[currentLayoutIndex]?.layout ===
-                    layout.id
+                    currentEdit.groups.find(g => g.id === currentGroupId)?.layout === layout.id
                       ? "border-blue-500 bg-blue-50"
                       : "border-gray-300"
                   }`}
@@ -1086,8 +1441,7 @@ const EditUrl = () => {
                   <div className="text-sm font-medium mb-2">{layout.name}</div>
                   {renderLayoutPreview(
                     layout.id,
-                    currentEdit.url_content[currentLayoutIndex]?.layout ===
-                      layout.id
+                    currentEdit.groups.find(g => g.id === currentGroupId)?.layout === layout.id
                   )}
                 </button>
               ))}
@@ -1126,13 +1480,11 @@ const EditUrl = () => {
                 </svg>
               </button>
             </div>
-            {currentSchedulerIndex !== null && (
+            {currentSchedulerGroupId && (
               <ContentScheduler
-                schedule={currentEdit.url_content[currentSchedulerIndex].schedule}
-                onChange={(field, value) =>
-                  handleContentChange(currentSchedulerIndex, "schedule", value)
-                }
-                index={currentSchedulerIndex}
+                schedule={currentEdit.groups.find(g => g.id === currentSchedulerGroupId).schedule}
+                onChange={(index, field, value) => updateSchedule(currentSchedulerGroupId, field, value)}
+                index={0}
               />
             )}
             <div className="mt-4 flex justify-center">
