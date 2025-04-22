@@ -174,17 +174,24 @@ const PageRenderer = ({ page, pageNum }) => {
 };
 
 // DocumentContent Component with Auto-Scrolling Controlled by isPaused
-const DocumentContent = ({ content, getContentUrl, isPaused }) => {
+const DocumentContent = ({ content, summary, getContentUrl, isPaused }) => {
   const fileType = content.split(".").pop().toLowerCase();
   const fileUrl = getContentUrl(content);
   const [pages, setPages] = useState([]);
   const [error, setError] = useState(null);
+  const [showSummary, setShowSummary] = useState(!!summary); // Initialize to true if summary exists
   const containerRef = useRef(null);
   const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.1 });
 
+  // Toggle between summary and document
+  const toggleSummary = (e) => {
+    e.stopPropagation();
+    setShowSummary((prev) => !prev);
+  };
+
   // Load PDF pages
   useEffect(() => {
-    if (fileType === "pdf" && inView) {
+    if (fileType === "pdf" && inView && !showSummary) {
       console.log("Loading PDF:", fileUrl);
       const loadPdf = async () => {
         try {
@@ -217,7 +224,7 @@ const DocumentContent = ({ content, getContentUrl, isPaused }) => {
       };
       loadPdf();
     }
-  }, [fileType, fileUrl, inView]);
+  }, [fileType, fileUrl, inView, showSummary]);
 
   // Auto-scrolling logic controlled by isPaused
   useEffect(() => {
@@ -225,7 +232,8 @@ const DocumentContent = ({ content, getContentUrl, isPaused }) => {
       (fileType === "pdf" || fileType === "ppt" || fileType === "pptx") &&
       inView &&
       !isPaused &&
-      containerRef.current
+      containerRef.current &&
+      !showSummary
     ) {
       console.log(`Starting auto-scroll for ${fileType}, isPaused: ${isPaused}`);
       const container = containerRef.current;
@@ -243,7 +251,36 @@ const DocumentContent = ({ content, getContentUrl, isPaused }) => {
         clearInterval(scrollInterval);
       };
     }
-  }, [fileType, inView, isPaused]);
+  }, [fileType, inView, isPaused, showSummary]);
+
+  // Clean summary by removing <think> tags
+  const cleanedSummary = summary
+    ? summary.replace(/<think>[\s\S]*<\/think>/g, "").trim()
+    : null;
+
+  // Render summary view if summary exists and showSummary is true
+  if (cleanedSummary && showSummary) {
+    return (
+      <div className="relative w-full h-screen">
+        <div className="w-full h-screen overflow-y-auto scrollbar-hidden bg-gray-900 p-8">
+          <div className="max-w-3xl mx-auto">
+            <h2 className="text-2xl font-bold mb-6 text-white">Document Summary</h2>
+            <div className="prose prose-lg prose-invert">
+              <div dangerouslySetInnerHTML={{ __html: cleanedSummary }} className="text-white" />
+            </div>
+          </div>
+        </div>
+
+        {/* Toggle button to switch to full document */}
+        <button
+          onClick={toggleSummary}
+          className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+        >
+          View Full Document
+        </button>
+      </div>
+    );
+  }
 
   if (fileType === "pdf") {
     return (
@@ -283,6 +320,16 @@ const DocumentContent = ({ content, getContentUrl, isPaused }) => {
             </div>
           )}
         </div>
+
+        {/* Show summary toggle button if summary exists */}
+        {cleanedSummary && (
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+          >
+            View Summary
+          </button>
+        )}
       </div>
     );
   }
@@ -325,6 +372,16 @@ const DocumentContent = ({ content, getContentUrl, isPaused }) => {
             </div>
           )}
         </div>
+
+        {/* Show summary toggle button if summary exists */}
+        {cleanedSummary && (
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+          >
+            View Summary
+          </button>
+        )}
       </div>
     );
   }
@@ -396,6 +453,7 @@ const MediaItem = React.memo(
       return (
         <DocumentContent
           content={content.content}
+          summary={content.summary}
           getContentUrl={getContentUrl}
           isPaused={isPaused}
         />
