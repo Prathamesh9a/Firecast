@@ -23,6 +23,7 @@
     "office-to-pdf": "^4.0.0",
     "officegen": "^0.6.5",
     "pdf-lib": "^1.17.1",
+    "pdfkit": "^0.17.0",
     "pptx2pdf": "^1.0.10",
     "sequelize": "^6.37.4",
     "sqlite3": "^5.1.7",

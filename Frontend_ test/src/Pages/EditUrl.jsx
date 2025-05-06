@@ -79,48 +79,69 @@ const EditUrl = () => {
         setUrls(urls.filter((url) => url.id !== id));
         fetchExistingUrls();
         setLoading(false);
+        Swal.fire({
+          title: "Deleted!",
+          text: "The Screen has been deleted.",
+          icon: "success",
+          confirmButtonText: "OK",
+        });
       } catch (error) {
         const message =
           error.response?.data?.message || "An unexpected error occurred.";
-        alert(message);
+        Swal.fire({
+          title: "Error!",
+          text: message,
+          icon: "error",
+          confirmButtonText: "OK",
+        });
         setLoading(false);
       }
     }
   };
 
   const handleEdit = (url) => {
+    // Map url_content to groups, preserving all schedule fields
     const groups = url.url_content.reduce((acc, content, index) => {
-      if (index === 0 || content.layout !== acc[acc.length - 1].layout) {
+      const schedule = {
+        startDate: content.schedule?.startDate || "",
+        endDate: content.schedule?.endDate || "",
+        frequency: content.schedule?.frequency || "none",
+        repeatInterval: content.schedule?.repeatInterval || "1",
+        repeatUntil: content.schedule?.repeatUntil || "",
+        weeklyDays: content.schedule?.weeklyDays || [],
+        monthlyRule: content.schedule?.monthlyRule || "",
+        displayMode: content.schedule?.displayMode || "mixed",
+        priority: content.schedule?.priority || "medium",
+        timeWindows: content.schedule?.timeWindows?.length > 0
+          ? content.schedule.timeWindows.map((tw) => ({
+              startTime: tw.startTime || "",
+              endTime: tw.endTime || "",
+            }))
+          : [{ startTime: "", endTime: "" }],
+      };
+
+      if (index === 0 || content.layout !== acc[acc.length - 1]?.layout) {
         acc.push({
           id: uuidv4(),
           layout: content.layout || "single",
-          time: content.time || 60,
-          schedule: content.schedule || {
-            startTime: "",
-            endTime: "",
-            startDate: "",
-            endDate: "",
-            frequency: "none",
-            repeatInterval: 1,
-            repeatUntil: "",
-            weeklyDays: [],
-            monthlyRule: "",
-            displayMode: "exclusive",
-            priority: "medium",
-            timeWindows: [{ startTime: "", endTime: "" }],
-          },
-          items: [{
-            id: uuidv4(), // Add unique ID for each item
-            link: content.content || "",
-            file: content.file || null,
-            analyzeWithAI: content.analyzeWithAI || false,
-          }],
+          time: content.time || "",
+          schedule,
+          items: [
+            {
+              id: uuidv4(),
+              link: content.content || "",
+              file: content.file || null,
+              fileName: content.fileName || null,
+              analyzeWithAI: content.analyzeWithAI || false,
+            },
+          ],
         });
       } else {
         acc[acc.length - 1].items.push({
-          id: uuidv4(), // Add unique ID for each item
+          id: uuidv4(),
           link: content.content || "",
           file: content.file || null,
+          fileName: content.fileName || null,
           analyzeWithAI: content.analyzeWithAI || false,
         });
       }
@@ -129,26 +150,28 @@ const EditUrl = () => {
 
     setCurrentEdit({
       ...url,
-      groups: groups.length > 0 ? groups : [{
-        id: uuidv4(),
-        layout: "single",
-        time: 60,
-        schedule: {
-          startTime: "",
-          endTime: "",
-          startDate: "",
-          endDate: "",
-          frequency: "none",
-          repeatInterval: 1,
-          repeatUntil: "",
-          weeklyDays: [],
-          monthlyRule: "",
-          displayMode: "exclusive",
-          priority: "medium",
-          timeWindows: [{ startTime: "", endTime: "" }],
-        },
-        items: [{ id: uuidv4(), link: "", file: null, analyzeWithAI: false }],
-      }],
+      groups: groups.length > 0
+        ? groups
+        : [
+            {
+              id: uuidv4(),
+              layout: "single",
+              time: " ",
+              schedule: {
+                startDate: "",
+                endDate: "",
+                frequency: "none",
+                repeatInterval: "1",
+                repeatUntil: "",
+                weeklyDays: [],
+                monthlyRule: "",
+                displayMode: "mixed",
+                priority: "medium",
+                timeWindows: [{ startTime: "", endTime: "" }],
+              },
+              items: [{ id: uuidv4(), link: "", file: null, fileName: null, analyzeWithAI: false }],
+            },
+          ],
     });
     setShowCustomTicker(!!url.custom_ticker);
     setCustomTickerText(url.custom_ticker || "");
@@ -171,7 +194,7 @@ const EditUrl = () => {
         const decodedToken = jwtDecode(token);
         userId = decodedToken.userId;
       }
-
+  
       if (!currentEdit.Url_Name.trim()) {
         Swal.fire({
           title: "Oops!",
@@ -182,16 +205,21 @@ const EditUrl = () => {
         setLoading(false);
         return;
       }
-
-      const links = currentEdit.groups.flatMap(group =>
-        group.items.map(item => ({
+  
+      const links = currentEdit.groups.flatMap((group) =>
+        group.items.map((item) => ({
           ...item,
           layout: group.layout,
           time: group.time,
-          schedule: group.schedule,
+          schedule: {
+            ...group.schedule,
+            timeWindows: group.schedule.timeWindows?.filter(
+              (tw) => tw.startTime && tw.endTime
+            ) || [], // Filter out invalid time windows
+          },
         }))
       );
-
+  
       for (const [index, linkItem] of links.entries()) {
         if (!linkItem.link && !linkItem.file) {
           Swal.fire({
@@ -203,19 +231,28 @@ const EditUrl = () => {
           setLoading(false);
           return;
         }
-
+  
         if (linkItem.file) {
           const allowedTypes = [
-            "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-            "video/mp4", "video/webm", "video/quicktime",
-            "application/pdf", "application/vnd.ms-powerpoint",
+            "image/jpeg",
+            "image/jpg",
+            "image/png",
+            "image/gif",
+            "image/svg+xml",
+            "video/mp4",
+            // "video/webm",
+            // "video/quicktime",
+            "application/pdf",
+            "application/vnd.ms-powerpoint",
             "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
           ];
           if (!allowedTypes.includes(linkItem.file.type)) {
             Swal.fire({
               title: "Oops!",
-              text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, MOV, PDF, PPT, PPTX, DOC, DOCX.`,
+              text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, MOV, PDF, PPT, PPTX, DOC, DOCX, TXT`,
               icon: "warning",
               confirmButtonText: "OK",
             });
@@ -234,28 +271,28 @@ const EditUrl = () => {
           }
         }
       }
-
+  
       const formData = new FormData();
       formData.append("id", currentEdit.id);
       formData.append("Url_Name", currentEdit.Url_Name);
       formData.append("userId", userId);
       formData.append("custom_ticker", showCustomTicker ? customTickerText : "");
-
+  
       links.forEach((linkItem, index) => {
         formData.append(`links[${index}][link]`, linkItem.link);
         formData.append(`links[${index}][time]`, linkItem.time);
         formData.append(`links[${index}][analyzeWithAI]`, linkItem.analyzeWithAI);
         formData.append(`links[${index}][layout]`, linkItem.layout);
-        formData.append(`links[${index}][schedule][startDate]`, linkItem.schedule.startDate);
-        formData.append(`links[${index}][schedule][endDate]`, linkItem.schedule.endDate);
-        formData.append(`links[${index}][schedule][frequency]`, linkItem.schedule.frequency);
-        formData.append(`links[${index}][schedule][repeatInterval]`, linkItem.schedule.repeatInterval);
-        formData.append(`links[${index}][schedule][repeatUntil]`, linkItem.schedule.repeatUntil);
-        formData.append(`links[${index}][schedule][weeklyDays]`, JSON.stringify(linkItem.schedule.weeklyDays));
-        formData.append(`links[${index}][schedule][monthlyRule]`, linkItem.schedule.monthlyRule);
-        formData.append(`links[${index}][schedule][displayMode]`, linkItem.schedule.displayMode);
-        formData.append(`links[${index}][schedule][priority]`, linkItem.schedule.priority);
-        if (linkItem.schedule.timeWindows) {
+        formData.append(`links[${index}][schedule][startDate]`, linkItem.schedule.startDate || "");
+        formData.append(`links[${index}][schedule][endDate]`, linkItem.schedule.endDate || "");
+        formData.append(`links[${index}][schedule][frequency]`, linkItem.schedule.frequency || "none");
+        formData.append(`links[${index}][schedule][repeatInterval]`, linkItem.schedule.repeatInterval || "1");
+        formData.append(`links[${index}][schedule][repeatUntil]`, linkItem.schedule.repeatUntil || "");
+        formData.append(`links[${index}][schedule][weeklyDays]`, JSON.stringify(linkItem.schedule.weeklyDays || []));
+        formData.append(`links[${index}][schedule][monthlyRule]`, linkItem.schedule.monthlyRule || "");
+        formData.append(`links[${index}][schedule][displayMode]`, linkItem.schedule.displayMode || "mixed");
+        formData.append(`links[${index}][schedule][priority]`, linkItem.schedule.priority || "medium");
+        if (linkItem.schedule.timeWindows?.length > 0) {
           linkItem.schedule.timeWindows.forEach((tw, twIndex) => {
             formData.append(`links[${index}][schedule][timeWindows][${twIndex}][startTime]`, tw.startTime);
             formData.append(`links[${index}][schedule][timeWindows][${twIndex}][endTime]`, tw.endTime);
@@ -263,20 +300,20 @@ const EditUrl = () => {
         }
         if (linkItem.file) {
           formData.append(`links[${index}][file]`, linkItem.file);
-          formData.append(`links[${index}][fileName]`, linkItem.file.name);
+          formData.append(`links[${index}][fileName]`, linkItem.fileName || linkItem.file.name);
         }
       });
-
-      await axios.patch(`${apiBaseUrl}/api/upload/updateUrlContent`, formData, {
+  
+      const response = await axios.patch(`${apiBaseUrl}/api/upload/updateUrlContent`, formData, {
         headers: {
           Authorization: token,
           "Content-Type": "multipart/form-data",
         },
       });
-
-      setUrls(urls.map(url =>
+  
+      setUrls(urls.map((url) =>
         url.id === currentEdit.id
-          ? { ...currentEdit, custom_ticker: showCustomTicker ? customTickerText : "" }
+          ? { ...currentEdit, custom_ticker: showCustomTicker ? customTickerText : "", url_content: response.data.url_content }
           : url
       ));
       setIsEditing(false);
@@ -284,6 +321,12 @@ const EditUrl = () => {
       setShowCustomTicker(false);
       setCustomTickerText("");
       setLoading(false);
+      Swal.fire({
+        title: "Success!",
+        text: "Screen updated successfully.",
+        icon: "success",
+        confirmButtonText: "OK",
+      });
       setTimeout(() => {
         window.location.reload();
       }, 100);
@@ -298,7 +341,6 @@ const EditUrl = () => {
       setLoading(false);
     }
   };
-
   const handleInputChange = (e) => {
     const { name, value } = e.target;
     setCurrentEdit({ ...currentEdit, [name]: value });
@@ -312,22 +354,20 @@ const EditUrl = () => {
         {
           id: uuidv4(),
           layout: "single",
-          time: 60,
+          time: " ",
           schedule: {
-            startTime: "",
-            endTime: "",
             startDate: "",
             endDate: "",
             frequency: "none",
-            repeatInterval: 1,
+            repeatInterval: "1",
             repeatUntil: "",
             weeklyDays: [],
             monthlyRule: "",
-            displayMode: "exclusive",
+            displayMode: "mixed",
             priority: "medium",
             timeWindows: [{ startTime: "", endTime: "" }],
           },
-          items: [{ id: uuidv4(), link: "", file: null, analyzeWithAI: false }],
+          items: [{ id: uuidv4(), link: "", file: null, fileName: null, analyzeWithAI: false }],
         },
       ],
     });
@@ -345,7 +385,7 @@ const EditUrl = () => {
     }
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.filter(group => group.id !== groupId),
+      groups: currentEdit.groups.filter((group) => group.id !== groupId),
     });
   };
 
@@ -367,7 +407,7 @@ const EditUrl = () => {
     if (itemIndex === 0) return;
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           const newItems = [...group.items];
           [newItems[itemIndex], newItems[itemIndex - 1]] = [newItems[itemIndex - 1], newItems[itemIndex]];
@@ -381,7 +421,7 @@ const EditUrl = () => {
   const moveItemDown = (groupId, itemIndex) => {
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId && itemIndex < group.items.length - 1) {
           const newItems = [...group.items];
           [newItems[itemIndex], newItems[itemIndex + 1]] = [newItems[itemIndex + 1], newItems[itemIndex]];
@@ -395,7 +435,7 @@ const EditUrl = () => {
   const deleteItem = (groupId, itemId) => {
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           if (group.items.length === 1) {
             Swal.fire({
@@ -406,7 +446,7 @@ const EditUrl = () => {
             });
             return group;
           }
-          const layout = layoutOptions.find(l => l.id === group.layout);
+          const layout = layoutOptions.find((l) => l.id === group.layout);
           if (group.items.length <= layout.itemCount) {
             Swal.fire({
               title: "Oops!",
@@ -418,7 +458,7 @@ const EditUrl = () => {
           }
           return {
             ...group,
-            items: group.items.filter(item => item.id !== itemId),
+            items: group.items.filter((item) => item.id !== itemId),
           };
         }
         return group;
@@ -429,8 +469,8 @@ const EditUrl = () => {
   const handleTimeChange = (groupId, value) => {
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group =>
-        group.id === groupId ? { ...group, time: parseInt(value, 10) || 60 } : group
+      groups: currentEdit.groups.map((group) =>
+        group.id === groupId ? { ...group, time: parseInt(value, 10) || " " } : group
       ),
     });
   };
@@ -440,15 +480,36 @@ const EditUrl = () => {
     if (!file) return;
 
     const allowedMimeTypes = [
-      "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/quicktime",
-      "application/pdf", "application/vnd.ms-powerpoint",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/svg+xml",
+      "video/mp4",
+      // "video/webm",
+      // "video/quicktime",
+      "application/pdf",
+      "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
     ];
     const allowedExtensions = [
-      "mp4", "webm", "mov", "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx",
+      "mp4",
+      "webm",
+      "mov",
+      "jpeg",
+      "jpg",
+      "png",
+      "gif",
+      "svg",
+      "pdf",
+      "ppt",
+      "pptx",
+      "doc",
+      "docx",
+      "txt",
     ];
     const maxFileSize = 524288000;
 
@@ -488,22 +549,23 @@ const EditUrl = () => {
     const url = URL.createObjectURL(file);
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           const newItems = [...group.items];
           newItems[itemIndex] = {
             ...newItems[itemIndex],
             link: url,
             file: file,
+            fileName: file.name,
           };
           if (file.type.startsWith("video/")) {
             const video = document.createElement("video");
             video.src = url;
             video.onloadedmetadata = () => {
               const durationInSeconds = Math.floor(video.duration);
-              setCurrentEdit(prev => ({
+              setCurrentEdit((prev) => ({
                 ...prev,
-                groups: prev.groups.map(g =>
+                groups: prev.groups.map((g) =>
                   g.id === groupId ? { ...g, time: durationInSeconds } : g
                 ),
               }));
@@ -521,15 +583,36 @@ const EditUrl = () => {
     if (!file) return;
 
     const allowedMimeTypes = [
-      "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/quicktime",
-      "application/pdf", "application/vnd.ms-powerpoint",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/gif",
+      "image/svg+xml",
+      "video/mp4",
+      // "video/webm",
+      // "video/quicktime",
+      "application/pdf",
+      "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain",
     ];
     const allowedExtensions = [
-      "mp4", "webm", "mov", "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx",
+      "mp4",
+      "webm",
+      "mov",
+      "jpeg",
+      "jpg",
+      "png",
+      "gif",
+      "svg",
+      "pdf",
+      "ppt",
+      "pptx",
+      "doc",
+      "docx",
+      "txt",
     ];
     const maxFileSize = 524288000;
 
@@ -569,22 +652,23 @@ const EditUrl = () => {
     const url = URL.createObjectURL(file);
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           const newItems = [...group.items];
           newItems[itemIndex] = {
             ...newItems[itemIndex],
             link: url,
             file: file,
+            fileName: file.name,
           };
           if (file.type.startsWith("video/")) {
             const video = document.createElement("video");
             video.src = url;
             video.onloadedmetadata = () => {
               const durationInSeconds = Math.floor(video.duration);
-              setCurrentEdit(prev => ({
+              setCurrentEdit((prev) => ({
                 ...prev,
-                groups: prev.groups.map(g =>
+                groups: prev.groups.map((g) =>
                   g.id === groupId ? { ...g, time: durationInSeconds } : g
                 ),
               }));
@@ -600,7 +684,7 @@ const EditUrl = () => {
   const toggleAnalyzeWithAI = (groupId, itemIndex) => {
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           const newItems = [...group.items];
           newItems[itemIndex].analyzeWithAI = !newItems[itemIndex].analyzeWithAI;
@@ -614,7 +698,7 @@ const EditUrl = () => {
   const updateSchedule = (groupId, field, value) => {
     setCurrentEdit({
       ...currentEdit,
-      groups: currentEdit.groups.map(group => {
+      groups: currentEdit.groups.map((group) => {
         if (group.id === groupId) {
           if (field === "timeWindows") {
             return { ...group, schedule: { ...group.schedule, timeWindows: value } };
@@ -639,26 +723,32 @@ const EditUrl = () => {
 
   const selectLayout = (layoutId) => {
     if (currentGroupId) {
-      const layout = layoutOptions.find(l => l.id === layoutId);
+      const layout = layoutOptions.find((l) => l.id === layoutId);
       const requiredItems = layout.itemCount;
+      
       setCurrentEdit({
         ...currentEdit,
-        groups: currentEdit.groups.map(group => {
+        groups: currentEdit.groups.map((group) => {
           if (group.id === currentGroupId) {
             let newItems = [...group.items];
+            
+            // Ensure we have exactly the required number of items for this layout
             if (newItems.length < requiredItems) {
-              const newItemTemplate = {
-                id: uuidv4(),
-                link: "",
-                file: null,
-                analyzeWithAI: false,
-              };
-              while (newItems.length < requiredItems) {
-                newItems.push({ ...newItemTemplate });
+              // Add more items if we need more
+              for (let i = newItems.length; i < requiredItems; i++) {
+                newItems.push({ 
+                  id: uuidv4(), 
+                  link: "", 
+                  file: null, 
+                  fileName: null, 
+                  analyzeWithAI: false 
+                });
               }
             } else if (newItems.length > requiredItems) {
+              // Remove excess items if we have too many
               newItems = newItems.slice(0, requiredItems);
             }
+            
             return { ...group, layout: layoutId, items: newItems };
           }
           return group;
@@ -777,6 +867,12 @@ const EditUrl = () => {
                 : url
             )
           );
+          Swal.fire({
+            title: "Success!",
+            text: "Screen status updated.",
+            icon: "success",
+            confirmButtonText: "OK",
+          });
         }
       } catch (error) {
         Swal.fire({
@@ -834,7 +930,7 @@ const EditUrl = () => {
       )}
       <div
         style={{ fontFamily: "Outfit" }}
-        className="p-6 max-w-[50%] mx-auto rounded-lg h-[calc(100vh-80px)] overflow-auto bg-[#f1f1f1] z-50"
+        className="p-6 w-full max-w-4xl mx-auto rounded-lg h-[calc(100vh-80px)] overflow-auto bg-[#f1f1f1] z-50 overflow-x-hidden"
       >
         {isEditing ? (
           <div>
@@ -868,9 +964,7 @@ const EditUrl = () => {
                     className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${
                       showCustomTicker ? "bg-green-500" : "bg-gray-400"
                     }`}
-                    aria-label={`Toggle custom ticker ${
-                      showCustomTicker ? "off" : "on"
-                    }`}
+                    aria-label={`Toggle custom ticker ${showCustomTicker ? "off" : "on"}`}
                   >
                     <div
                       className={`w-4 h-4 bg-white rounded-full transform transition-transform duration-300 ${
@@ -900,7 +994,7 @@ const EditUrl = () => {
                 )}
               </AnimatePresence>
 
-              <div className="scrollable-container w-full" style={{ maxHeight: "380px", overflowY: "auto" }}>
+              <div className="" style={{ maxHeight: "380px", overflowY: "auto" }}>
                 <AnimatePresence>
                   {currentEdit?.groups?.map((group, groupIndex) => (
                     <motion.div
@@ -911,7 +1005,7 @@ const EditUrl = () => {
                       exit={{ opacity: 0, y: 10 }}
                       transition={{ type: "spring", stiffness: 300, damping: 20 }}
                       className="mb-5 border border-gray-300 rounded-2xl bg-white p-4"
-                      style={{ width: "600px", position: "relative", zIndex: 1 }}
+                      style={{ className: "w-full max-w-3xl", position: "relative", zIndex: 1 }}
                     >
                       <div className="flex items-center justify-between mb-4">
                         <div className="flex items-center">
@@ -998,181 +1092,114 @@ const EditUrl = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex flex-col md:flex-row items-end gap-3 mb-3">
-                        <div className="items-center">
-                          <p
-                            style={{
-                              fontFamily: "Outfit",
-                              fontWeight: "500",
-                              color: "#6F7C8E",
-                              lineHeight: "17.64px",
-                              marginBottom: "7px",
-                            }}
-                          >
-                            Enter Time
-                          </p>
-                          <div className="time-input-group" style={{ position: "relative" }}>
-                            <IoTimeOutline
-                              style={{
-                                position: "absolute",
-                                top: "13px",
-                                left: "7px",
-                                color: "#6F7C8E",
-                              }}
-                            />
-                            <div
-                              style={{
-                                width: "1px",
-                                height: "60%",
-                                backgroundColor: "#E1E1E1",
-                                marginRight: "8px",
-                              }}
-                            ></div>
-                            <input
-                              type="number"
-                              className="w-16 p-2 border border-gray-300 rounded-md text-center"
-                              value={group.time}
-                              onChange={(e) => handleTimeChange(group.id, e.target.value)}
-                              placeholder="Time"
-                              required
-                              style={{ width: "112px", paddingLeft: "28px", paddingRight: "35px" }}
-                            />
-                            <span
-                              className="time"
-                              style={{
-                                position: "absolute",
-                                top: "0",
-                                width: "auto",
-                                right: "0",
-                                background: "black",
-                                height: "100%",
-                                borderRadius: "0px 5px 5px 0px",
-                                textAlign: "center",
-                                lineHeight: "40px",
-                                color: "white",
-                                fontSize: "14px",
-                                paddingRight: "6px",
-                                paddingLeft: "6px",
-                              }}
-                            >
-                              Sec
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex items-center">
-                          <button
-                            onClick={() => openSchedulerModal(group.id)}
-                            className={`p-2 rounded-lg text-sm text-center leading-tight ${
-                              group.schedule?.startTime || group.schedule?.startDate
-                                ? "bg-blue-100 text-blue-700 border border-blue-300"
-                                : "bg-gray-200 text-gray-700"
-                            }`}
-                            style={{ width: "80px", height: "45px" }}
-                          >
-                            {group.schedule?.startTime || group.schedule?.startDate ? (
-                              <>
-                                Edit<br />Schedule
-                              </>
-                            ) : (
-                              <>
-                                Add<br />Schedule
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
                       {group.items.map((item, itemIndex) => (
                         <div
                           key={item.id}
                           className="flex items-center mb-3"
                           style={{
+                            className: "w-full",
                             borderBottom:
                               itemIndex < group.items.length - 1 ? "1px solid #eee" : "none",
                             paddingBottom:
                               itemIndex < group.items.length - 1 ? "10px" : "0",
                           }}
                         >
-                          <div className="flex-grow">
-                            <div
-                              className="relative flex items-center border-gray-300 rounded-md"
-                              style={{ width: "440px", paddingRight: "0px" }}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                const droppedFiles = Array.from(e.dataTransfer.files);
-                                handleFileDrop(group.id, itemIndex, droppedFiles);
-                              }}
-                            >
+                          <div className="flex flex-wrap gap-4 items-end">
+                            <div className="flex items-center border border-gray-300 rounded-md bg-[#F7F7FF] overflow-hidden">
                               <button
                                 type="button"
-                                className="h-16 px-4 text-white rounded-l-lg flex items-center justify-center hover:bg-blue-700"
+                                className="h-16 px-4 text-white bg-[#363736] flex items-center justify-center hover:bg-blue-700"
                                 onClick={() =>
                                   document
                                     .getElementById(`file-input-${group.id}-${item.id}`)
                                     .click()
                                 }
-                                style={{ height: "66px", backgroundColor: "#363736" }}
                               >
-                                <FaFileArrowUp className="text-lg" style={{ paddingLeft: "6px" }} />
-                                <p style={{ fontFamily: "Outfit", paddingLeft: "6px", paddingRight: "6px" }}>
-                                  Upload
-                                </p>
+                                <FaFileArrowUp className="text-lg mr-2" />
+                                <span style={{ fontFamily: "Outfit" }}>Upload</span>
                               </button>
                               <input
                                 type="file"
                                 className="hidden"
-                                accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                                accept="image/*,video/*,application/pdf,application/vnd.*"
                                 onChange={(e) => handleFileUpload(group.id, itemIndex, e)}
                                 id={`file-input-${group.id}-${item.id}`}
                               />
                               <input
                                 type="text"
-                                className="w-full p-3 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
-                                style={{
-                                  height: "66px",
-                                  width: "70%",
-                                  backgroundColor: "#F7F7FF",
-                                  paddingLeft: "12px",
-                                  fontFamily: "Outfit",
-                                  color: item.file ? "green" : "black",
-                                }}
-                                placeholder="Embedded Link / Image / Video or Upload File"
-                                value={item.file ? item.file.name : item.link}
+                                className="w-64 p-3 text-sm placeholder-gray-500 bg-[#F7F7FF] text-black focus:outline-none"
+                                value={item.file ? item.fileName || item.file.name : item.link}
+                                placeholder="Embedded Link or Upload"
                                 onChange={(e) => {
-                                  setCurrentEdit({
-                                    ...currentEdit,
-                                    groups: currentEdit.groups.map(g => {
+                                  setCurrentEdit((prev) => ({
+                                    ...prev,
+                                    groups: prev.groups.map((g) => {
                                       if (g.id === group.id) {
-                                        const newItems = [...g.items];
-                                        newItems[itemIndex].link = e.target.value;
-                                        newItems[itemIndex].file = null;
-                                        return { ...g, items: newItems };
+                                        const updatedItems = [...g.items];
+                                        updatedItems[itemIndex].link = e.target.value;
+                                        updatedItems[itemIndex].file = null;
+                                        updatedItems[itemIndex].fileName = null;
+                                        return { ...g, items: updatedItems };
                                       }
                                       return g;
                                     }),
-                                  });
+                                  }));
                                 }}
                               />
-                              {item.file?.type === "application/pdf" && (
-                                <div className="flex justify-center mt-2">
-                                  <label className="flex flex-col items-center cursor-pointer text-center">
-                                    <input
-                                      type="checkbox"
-                                      className="sr-only peer"
-                                      checked={item.analyzeWithAI}
-                                      onChange={() => toggleAnalyzeWithAI(group.id, itemIndex)}
-                                    />
-                                    <div className="relative w-11 h-6 bg-gray-200 rounded-full peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                                    <span className="mt-2 text-sm font-medium text-gray-700 leading-tight">
-                                      Summarize<br />with AI
-                                    </span>
-                                  </label>
-                                </div>
-                              )}
+                            </div>
+
+                            <div>
+                              <label className="block mb-1 text-sm text-gray-700 font-medium">
+                                Enter Time
+                              </label>
+                              <div className="relative">
+                                <IoTimeOutline className="absolute top-3 left-2 text-gray-500" />
+                                <input
+                                  type="number"
+                                  className="pl-8 pr-10 py-2 border rounded-md w-28 text-center focus:ring-2 focus:ring-blue-500"
+                                  placeholder="Time"
+                                  value={group.time}
+                                  onChange={(e) => handleTimeChange(group.id, e.target.value)}
+                                />
+                                <span className="absolute right-1 top-[6px] bg-black text-white text-xs px-2 py-1 rounded-md">
+                                  Sec
+                                </span>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="block mb-1 text-sm text-gray-700 font-medium">
+                                Schedule
+                              </label>
+                              <button
+                                onClick={() => openSchedulerModal(group.id)}
+                                className={`px-3 py-2 rounded-md text-sm font-medium ${
+                                  group.schedule?.startTime ||
+                                  group.schedule?.startDate ||
+                                  group.schedule?.timeWindows?.some(
+                                    (tw) => tw.startTime || tw.endTime
+                                  )
+                                    ? "bg-blue-100 text-blue-700 border border-blue-300"
+                                    : "bg-gray-200 text-gray-700"
+                                }`}
+                              >
+                                {group.schedule?.startTime ||
+                                group.schedule?.startDate ||
+                                group.schedule?.timeWindows?.some(
+                                  (tw) => tw.startTime || tw.endTime
+                                ) ? (
+                                  <>
+                                    Edit<br />Schedule
+                                  </>
+                                ) : (
+                                  <>
+                                    Add<br />Schedule
+                                  </>
+                                )}
+                              </button>
                             </div>
                           </div>
+
                           {group.items.length > 1 && (
                             <div className="flex items-center ml-2">
                               <button
@@ -1288,9 +1315,7 @@ const EditUrl = () => {
                       />
                     </button>
                     <span
-                      className={`text-sm ${
-                        url.isEnabled ? "text-green-600" : "text-red-600"
-                      }`}
+                      className={`text-sm ${url.isEnabled ? "text-green-600" : "text-red-600"}`}
                     >
                       {url.isEnabled ? "Active" : "Inactive"}
                     </span>
@@ -1402,6 +1427,12 @@ const EditUrl = () => {
                             : url
                         )
                       );
+                      Swal.fire({
+                        title: "Success!",
+                        text: "Screen status updated.",
+                        icon: "success",
+                        confirmButtonText: "OK",
+                      });
                     }
                     setShowScheduleModal(false);
                     setScheduledAt(null);
@@ -1433,7 +1464,7 @@ const EditUrl = () => {
                   key={layout.id}
                   onClick={() => selectLayout(layout.id)}
                   className={`p-3 border rounded-md hover:bg-gray-50 ${
-                    currentEdit.groups.find(g => g.id === currentGroupId)?.layout === layout.id
+                    currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
                       ? "border-blue-500 bg-blue-50"
                       : "border-gray-300"
                   }`}
@@ -1441,7 +1472,7 @@ const EditUrl = () => {
                   <div className="text-sm font-medium mb-2">{layout.name}</div>
                   {renderLayoutPreview(
                     layout.id,
-                    currentEdit.groups.find(g => g.id === currentGroupId)?.layout === layout.id
+                    currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
                   )}
                 </button>
               ))}
@@ -1482,7 +1513,7 @@ const EditUrl = () => {
             </div>
             {currentSchedulerGroupId && (
               <ContentScheduler
-                schedule={currentEdit.groups.find(g => g.id === currentSchedulerGroupId).schedule}
+                schedule={currentEdit.groups.find((g) => g.id === currentSchedulerGroupId).schedule}
                 onChange={(index, field, value) => updateSchedule(currentSchedulerGroupId, field, value)}
                 index={0}
               />
