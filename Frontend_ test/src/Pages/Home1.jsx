@@ -36,7 +36,7 @@ const Home1 = () => {
     {
       id: uuidv4(),
       layout: 'single',
-      time: 60,
+      time: '',
       schedule: {
         startTime: '',
         endTime: '',
@@ -182,7 +182,7 @@ const Home1 = () => {
     setGroups([...groups, {
       id: uuidv4(),
       layout: 'single',
-      time: 60,
+      time: '',
       schedule: {
         startTime: '',
         endTime: '',
@@ -244,18 +244,19 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+      "video/mp4",   "video/x-matroska",
       "video/mpeg", // CHANGE: Added video/mpeg for broader MP4 support
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain" // CHANGE: Added text/plain for .txt files
     ];
 
 
     const allowedExtensions = [
       "mp4", "webm", "ogg", "mov", "avi", "mkv",
       "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx",
+      "pdf", "ppt", "pptx", "doc", "docx", "txt"
     ];
     const maxFileSize = 524288000; // 500MB
 
@@ -350,17 +351,18 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+      "video/mp4",   "video/x-matroska",
       "video/mpeg", // CHANGE: Added video/mpeg
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "text/plain" 
     ];
 
     const allowedExtensions = [
       "mp4", "webm", "ogg", "mov", "avi", "mkv",
       "jpeg", "jpg", "png", "gif", "svg",
-      "pdf", "ppt", "pptx", "doc", "docx",
+      "pdf", "ppt", "pptx", "doc", "docx", "txt"
     ];
     const maxFileSize = 524288000;
 
@@ -469,16 +471,17 @@ const Home1 = () => {
       if (linkItem.file) {
         const allowedTypes = [
           "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-          "video/mp4", "video/webm", "video/ogg", "video/quicktime", "video/x-msvideo", "video/x-matroska",
+          "video/mp4", "video/x-msvideo",
           "video/mpeg", // CHANGE: Added video/mpeg
           "application/pdf", "application/vnd.ms-powerpoint",
           "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "text/plain" // CHANGE: Added text/plain for .txt files
         ];
         if (!allowedTypes.includes(linkItem.file.type)) {
           Swal.fire({ // CHANGE: Replaced alert with Swal
             title: 'Error',
-            text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, OGG, MOV, AVI, MKV, MPEG, PDF, PPT, PPTX, DOC, DOCX.`,
+            text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, OGG, MOV, AVI, MKV, MPEG, PDF, PPT, PPTX, DOC, DOCX, txt`,
             icon: 'error',
             confirmButtonText: 'OK',
           });
@@ -846,7 +849,7 @@ const Home1 = () => {
                               className="hidden"
                               onChange={(e) => handleInputChange(group.id, itemIndex, e)}
                               id={`file-input-${group.id}-${itemIndex}`}
-                              accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,video/webm,video/quicktime,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                              accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                             />
                             <input
                               type="text"
@@ -886,7 +889,7 @@ const Home1 = () => {
                               value={group.time}
                               onChange={(e) => handleTimeChange(group.id, e.target.value)}
                               className="w-[112px] p-2 pl-8 pr-12 border border-gray-300 rounded-md text-center"
-                              placeholder="Time"
+                              placeholder="00"
                             />
                             <span
                               className="absolute right-1 top-[6px] bg-black text-white text-xs rounded px-1 py-[6px]"
