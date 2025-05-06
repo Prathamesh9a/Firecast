@@ -195,6 +195,7 @@ console.log(`IP Address (${ipAddress}) has been written to ${filePath}`);
 // Express app setup
 const app = express();
 const allowedOrigins = [
+  `http://122.179.140.84:4012`,
   `http://122.179.140.84:86`,
   `http://${ipAddress}:3000`,
   `http://${ipAddress}:3001`,

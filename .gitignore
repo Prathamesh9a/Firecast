@@ -130,3 +130,6 @@ dist
 .pnp.*
 Server_test/ticker_db.sqlite
 /Server_test/upload-service/uploads/User
+/Automation
+*.sqlite
+Server_test/ticker_db.sqlite

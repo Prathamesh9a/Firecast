@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import axios from "axios";
 import { useParams } from "react-router-dom";
 import { useInView } from "react-intersection-observer";
@@ -18,7 +18,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // Set the worker source to the local file in the public folder
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
-const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
+const apiBaseUrl = process.env.REACT_APP_API_BASE_URL || "";
 const weatherApiKey = process.env.REACT_APP_WEATHER_API_KEY;
 const newsApiKey = process.env.REACT_APP_NEWS_API_KEY;
 
@@ -37,6 +37,7 @@ const fallbackItem = {
   layout: "single",
   time: 10,
   originalIndex: 0,
+  content: null,
 };
 
 // Cache for API responses
@@ -45,8 +46,20 @@ const cache = {
   news: { data: null, timestamp: null, ttl: 30 * 60 * 1000 }, // 30 minutes
 };
 
+// Supported video extensions and their MIME types
+const videoExtensions = [
+  { ext: ".mp4", mime: "video/mp4" },
+  { ext: ".mov", mime: "video/quicktime" },
+  { ext: ".webm", mime: "video/webm" },
+];
+
 // Fallback UI with blank screen and centered text
-const renderFallbackUI = (message, countdownType, timeRemaining, formatTimeRemaining) => (
+const renderFallbackUI = (
+  message,
+  countdownType,
+  timeRemaining,
+  formatTimeRemaining
+) => (
   <div className="w-full h-full bg-black flex flex-col items-center justify-center">
     <div className="grid grid-cols-1 w-full h-full gap-2 p-2">
       <div className="w-full h-full bg-gray-800 animate-pulse rounded"></div>
@@ -69,6 +82,7 @@ const isPowerBIUrl = (url) => {
 };
 
 const isYouTubeLiveUrl = (url) => {
+  if (!url) return false;
   const youtubePatterns = [
     /youtube\.com\/live\/([a-zA-Z0-9_-]+)/,
     /youtube\.com\/watch\?v=([a-zA-Z0-9_-]+)(&|\?).*?\blive\b/,
@@ -89,207 +103,524 @@ const isYouTubeUrl = (url) => {
   );
 };
 
-const PageRenderer = ({ page, pageNum }) => {
+const getYouTubeEmbedUrl = (url) => {
+  if (!url) return "";
+  if (url.includes("youtu.be")) {
+    const videoId = url.split("youtu.be/")[1].split(/[?&]/)[0];
+    return `https://www.youtube.com/embed/${videoId}?autoplay=1&mute=1&controls=0`;
+  }
+  if (url.includes("youtube.com")) {
+    const videoIdMatch = url.match(/(?:v=|v\/|embed\/|watch\?v=|watch\?.+&v=)([^&?]+)/);
+    if (videoIdMatch && videoIdMatch[1]) {
+      return `https://www.youtube.com/embed/${videoIdMatch[1]}?autoplay=1&mute=1&controls=0`;
+    }
+  }
+  return url;
+};
+
+// PageRenderer Component
+const PageRenderer = React.memo(({ page, pageNum }) => {
   const canvasRef = useRef(null);
+  const containerRef = useRef(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  const updateWidth = useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setContainerWidth(rect.width);
+    } else {
+      setContainerWidth(window.innerWidth);
+    }
+  }, []);
 
   useEffect(() => {
-    if (canvasRef.current && page.viewport) {
-      const canvas = canvasRef.current;
-      const context = canvas.getContext("2d");
-      canvas.height = page.viewport.height;
-      canvas.width = page.viewport.width;
+    updateWidth();
+    const resizeObserver = new ResizeObserver(updateWidth);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+    window.addEventListener("resize", updateWidth);
+    return () => {
+      if (containerRef.current) {
+        resizeObserver.unobserve(containerRef.current);
+      }
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [updateWidth]);
 
-      const renderContext = {
-        canvasContext: context,
-        viewport: page.viewport,
-      };
+  useEffect(() => {
+    if (!canvasRef.current || !page || typeof page.render !== "function" || containerWidth <= 0) {
+      console.error(`Invalid page render conditions for page ${pageNum}`, {
+        page: !!page,
+        render: page?.render,
+        containerWidth,
+      });
+      return;
+    }
 
-      let isCancelled = false;
-      const renderTask = page.page.render(renderContext);
+    console.log(`Rendering PDF page ${pageNum}`);
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
 
-      renderTask.promise.catch((error) => {
+    const viewport = page.getViewport({ scale: 1.0 });
+    const aspectRatio = viewport.width / viewport.height;
+
+    const scale = (containerWidth * window.devicePixelRatio) / viewport.width;
+    const scaledViewport = page.getViewport({ scale });
+
+    canvas.width = scaledViewport.width;
+    canvas.height = scaledViewport.height;
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${containerWidth / aspectRatio}px`;
+
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+
+    const renderContext = { canvasContext: context, viewport: scaledViewport };
+    let isCancelled = false;
+    const renderTask = page.render(renderContext);
+
+    renderTask.promise
+      .then(() => console.log(`Successfully rendered page ${pageNum}`))
+      .catch((error) => {
         if (!isCancelled) {
           console.error(`Error rendering page ${pageNum}:`, error);
         }
       });
 
-      return () => {
-        isCancelled = true;
-        renderTask.cancel();
-      };
-    }
-  }, [page, pageNum]);
+    return () => {
+      isCancelled = true;
+      if (renderTask.cancel) renderTask.cancel();
+    };
+  }, [page, pageNum, containerWidth]);
+
+  if (!page || typeof page.render !== "function") {
+    return (
+      <div className="w-full h-auto bg-gray-900 text-white flex items-center justify-center">
+        Failed to render PDF page {pageNum}
+      </div>
+    );
+  }
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="w-full h-auto mb-4 mx-auto"
-      key={`page-${pageNum}`}
-    />
+    <div ref={containerRef} className="w-full">
+      <canvas ref={canvasRef} className="w-full h-auto" key={`page-${pageNum}`} />
+    </div>
   );
-};
+});
 
 // DocumentContent Component
-const DocumentContent = ({ content, getContentUrl }) => {
-  const fileType = content.split(".").pop().toLowerCase();
-  const fileUrl = getContentUrl(content);
-  const [pages, setPages] = useState([]);
-  const containerRef = useRef(null);
-  const { ref, inView } = useInView({ triggerOnce: true });
+const DocumentContent = React.memo(
+  ({ content, summary, getContentUrl, isPaused, originalFormat }) => {
+    const fileType = content?.split(".").pop()?.toLowerCase() || "";
+    const fileUrl = content ? getContentUrl(content) : "";
+    const [pages, setPages] = useState([]);
+    const [error, setError] = useState(null);
+    const [showSummary, setShowSummary] = useState(!!summary);
+    const containerRef = useRef(null);
+    const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.1 });
 
-  useEffect(() => {
-    if (fileType === "pdf" && inView) {
+    const toggleSummary = useCallback((e) => {
+      e.stopPropagation();
+      setShowSummary((prev) => !prev);
+    }, []);
+
+    useEffect(() => {
+      if (fileType !== "pdf" || !inView || showSummary || !fileUrl) return;
+
+      console.log("Loading PDF:", fileUrl);
       const loadPdf = async () => {
         try {
           const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+          console.log("PDF loaded successfully, pages:", pdf.numPages);
           const numPages = pdf.numPages;
           const pageData = [];
 
           for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-            const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.0 });
-            pageData.push({ pageNum, viewport, page });
+            try {
+              const page = await pdf.getPage(pageNum);
+              const viewport = page.getViewport({ scale: 1.0 });
+              console.log(`Page ${pageNum} loaded with viewport:`, viewport);
+              pageData.push({ pageNum, viewport, page });
+            } catch (pageError) {
+              console.error(`Error loading page ${pageNum}:`, pageError);
+            }
           }
 
-          setPages(pageData);
+          if (pageData.length === 0) {
+            setError("No valid pages found in PDF");
+          } else {
+            setPages(pageData);
+            setError(null);
+          }
         } catch (error) {
           console.error("Error loading PDF:", error);
+          setError("Failed to load PDF document. It may not have been converted correctly.");
         }
       };
       loadPdf();
-    }
-  }, [fileType, fileUrl, inView]);
+    }, [fileType, fileUrl, inView, showSummary]);
 
-  if (fileType === "pdf") {
-    return (
-      <div ref={ref} className="w-full h-screen overflow-y-auto scrollbar-hidden" style={{ scrollBehavior: "smooth" }}>
-        {inView ? (
-          <div
-            ref={containerRef}
-            className="w-full min-h-screen flex flex-col items-center p-4 bg-gray-900"
+    useEffect(() => {
+      if (
+        fileType !== "pdf" ||
+        !inView ||
+        isPaused ||
+        !containerRef.current ||
+        showSummary
+      )
+        return;
+
+      console.log(`Starting auto-scroll for ${fileType}, isPaused: ${isPaused}`);
+      const container = containerRef.current;
+      const scrollInterval = setInterval(() => {
+        if (container.scrollTop + container.clientHeight >= container.scrollHeight) {
+          console.log("Reached bottom, resetting to top");
+          container.scrollTo({ top: 0, behavior: "smooth" });
+        } else {
+          container.scrollBy({ top: 1, behavior: "auto" });
+        }
+      }, 50);
+
+      return () => {
+        console.log("Cleaning up scroll interval");
+        clearInterval(scrollInterval);
+      };
+    }, [fileType, inView, isPaused, showSummary]);
+
+    const cleanedSummary = summary
+      ? summary.replace(/<think>[\s\S]*<\/think>/g, "").trim()
+      : null;
+
+    if (cleanedSummary && showSummary) {
+      return (
+        <div className="relative w-full h-screen">
+          <div className="w-full h-screen overflow-y-auto scrollbar-hidden bg-gray-900 p-8">
+            <div className="max-w-3xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6 text-white">Document Summary</h2>
+              <div className="prose prose-lg prose-invert">
+                <div dangerouslySetInnerHTML={{ __html: cleanedSummary }} className="text-white" />
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
           >
-            {pages.length > 0 ? (
-              pages.map((page) => (
-                <div key={`page-container-${page.pageNum}`} className="w-full max-w-[95%] mb-4">
-                  <PageRenderer page={page} pageNum={page.pageNum} />
-                </div>
-              ))
+            View Full Document
+          </button>
+        </div>
+      );
+    }
+
+    if (fileType === "pdf") {
+      return (
+        <div className="relative w-full h-screen">
+          <div
+            ref={(node) => {
+              containerRef.current = node;
+              ref(node);
+            }}
+            className="w-full h-screen overflow-y-auto scrollbar-hidden"
+            style={{ scrollBehavior: "smooth" }}
+          >
+            {inView ? (
+              <div className="w-full min-h-screen flex flex-col items-center bg-gray-900">
+                {error ? (
+                  <div className="w-full h-screen flex items-center justify-center text-white">
+                    {error}
+                  </div>
+                ) : pages.length > 0 ? (
+                  <>
+                    {pages.map((page) => (
+                      <div
+                        key={`page-container-${page.pageNum}`}
+                        className="w-full mb-4"
+                      >
+                        <PageRenderer page={page.page} pageNum={page.pageNum} />
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="w-full h-screen flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                  </div>
+                )}
+              </div>
             ) : (
-              <div className="w-full h-screen flex items-center justify-center">
+              <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
               </div>
             )}
           </div>
-        ) : (
-          <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
-      </div>
-    );
-  }
+          {cleanedSummary && (
+            <button
+              onClick={toggleSummary}
+              className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+            >
+              View Summary
+            </button>
+          )}
+        </div>
+      );
+    }
 
-  if (fileType === "ppt" || fileType === "pptx" || fileType === "doc" || fileType === "docx") {
     return (
-      <div ref={ref} className="w-full h-full">
-        {inView ? (
-          <iframe
-            src={getContentUrl(content)}
-            width="100%"
-            height="100%"
-            frameBorder="0"
-            title={`${fileType.toUpperCase()} Viewer`}
-            className="document-iframe"
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
+      <div className="relative w-full h-screen">
+        <div
+          ref={(node) => {
+            containerRef.current = node;
+            ref(node);
+          }}
+          className="w-full h-screen overflow-y-auto scrollbar-hidden"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {inView ? (
+            <div className="w-full h-screen flex items-center justify-center text-white bg-gray-900">
+              <div className="text-center">
+                <p className="text-xl font-semibold mb-2">
+                  Error: Failed to display document
+                </p>
+                <p className="text-lg">
+                  The document may not have been converted to PDF correctly. Please contact support.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+        {cleanedSummary && (
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+          >
+            View Summary
+          </button>
         )}
       </div>
     );
   }
-
-  return null;
-};
-
+);
 
 // MediaItem Component
-const MediaItem = React.memo(({ content, index, isPaused, setProgress, getContentUrl, isWebpageUrl, videoRefs }) => {
-  const { ref, inView } = useInView({ triggerOnce: true });
+const MediaItem = React.memo(
+  ({
+    content,
+    index,
+    isPaused,
+    setProgress,
+    getContentUrl,
+    isWebpageUrl,
+    videoRefs,
+  }) => {
+    const { ref, inView } = useInView({ triggerOnce: true });
+    const videoRef = useRef(null);
+    const [error, setError] = useState(null);
+    const [fallbackSrc, setFallbackSrc] = useState(null);
 
-  useEffect(() => {
-    if (videoRef.current) {
-      videoRefs.current[index] = videoRef.current;
+    useEffect(() => {
+      if (videoRef.current && content?.content && videoExtensions.some((video) => content.content.toLowerCase().endsWith(video.ext))) {
+        videoRefs.current[index] = videoRef.current;
+      }
+      return () => {
+        if (videoRefs.current[index]) {
+          delete videoRefs.current[index];
+        }
+      };
+    }, [index, videoRefs, content]);
+
+    useEffect(() => {
+      if (!videoRef.current || !inView || !content?.content || !videoExtensions.some((video) => content.content.toLowerCase().endsWith(video.ext))) return;
+
+
+      if (isPaused) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play().catch((err) => {
+
+          setError({
+            message: "Failed to play video. Please check format or URL.",
+            details: {
+              code: err.code || "N/A",
+              // src: videoRef.current.currentSrc || "N/A",
+              // mimeType: videoRef.current.currentType || "N/A",
+              userAgent: navigator.userAgent,
+            },
+          });
+        });
+      }
+    }, [isPaused, inView, index, content, fallbackSrc]);
+
+    if (!content || !content.content) {
+      console.warn(`MediaItem: No content provided for index ${index}`, { content });
+      return (
+        <div className="w-full h-full flex items-center justify-center text-white bg-gray-900">
+          <p>No content available for this item.</p>
+        </div>
+      );
     }
-  }, [index, videoRefs]);
 
-  const videoRef = useRef(null);
+    console.log(`MediaItem: Rendering content for index ${index}`, {
+      content: content.content,
+      inView,
+    });
 
-  if (!content || !content.content) return null;
+    const contentUrl = getContentUrl(content.content);
 
-  if (isPowerBIUrl(content.content)) {
-    return (
-      <iframe
-        src={getContentUrl(content.content)}
-        className="w-full h-full"
-        title="Embedded Power BI Report"
-        frameBorder="0"
-        allowFullScreen
-      />
-    );
-  } else if (isWebpageUrl(content.content)) {
-    return <WebpageEmbed webpageUrl={getContentUrl(content.content)} />;
-  } else if (content.content.endsWith(".mp4")) {
-    return (
-      <div ref={ref} className="w-full h-full">
-        {inView ? (
-          <video
-            ref={videoRef}
-            src={getContentUrl(content.content)}
-            autoPlay={!isPaused}
-            muted
-            className="w-full h-full object-contain"
-            onTimeUpdate={(e) =>
-              setProgress((e.target.currentTime / e.target.duration) * 100)
-            }
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
-      </div>
-    );
-  } else if (
-    content.content.endsWith(".pdf") ||
-    content.content.endsWith(".pptx") ||
-    content.content.endsWith(".ppt") ||
-    content.content.endsWith(".docx") ||
-    content.content.endsWith(".doc")
-  ) {
-    return <DocumentContent content={content.content} getContentUrl={getContentUrl} />;
-  } else if (isYouTubeUrl(content.content)) {
-    return <YouTubeLive liveUrl={getContentUrl(content.content)} showControls={false} />;
-  } else {
-    return (
-      <div ref={ref} className="w-full h-full">
-        {inView ? (
-          <img
-            src={getContentUrl(content.content)}
-            alt="Preview content"
-            className="w-full h-full object-contain"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full bg-gray-900 flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-          </div>
-        )}
-      </div>
-    );
+    if (isPowerBIUrl(content.content)) {
+      return (
+        <iframe
+          src={contentUrl}
+          className="w-full h-full"
+          title="Embedded Power BI Report"
+          frameBorder="0"
+          allowFullScreen
+        />
+      );
+    } else if (isWebpageUrl(content.content)) {
+      return <WebpageEmbed webpageUrl={contentUrl} />;
+    } else if (videoExtensions.some((video) => content.content.toLowerCase().endsWith(video.ext))) {
+      const originalSrc = contentUrl;
+      const isMov = content.content.toLowerCase().endsWith(".mov");
+      const isWebm = content.content.toLowerCase().endsWith(".webm");
+      const videoSrc = fallbackSrc || originalSrc;
+
+      return (
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            error ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
+                <p className="text-lg font-semibold">{error.message}</p>
+                {error.details && (
+                  <p className="text-sm text-gray-400 mt-2">
+                    Error Code: {error.details.code} | MIME Type: {error.details.mimeType}
+                    <br />
+                    URL: {error.details.src}
+                    <br />
+                    Browser: {error.details.userAgent}
+                  </p>
+                )}
+                {content.thumbnail && (
+                  <img
+                    src={getContentUrl(content.thumbnail)}
+                    alt="Video fallback"
+                    className="mt-4 max-w-full max-h-64 object-contain"
+                  />
+                )}
+              </div>
+            ) : (
+              <video
+                ref={videoRef}
+                autoPlay={!isPaused}
+                loop
+                className="w-full h-full object-contain"
+                onTimeUpdate={(e) =>
+                  setProgress((e.target.currentTime / e.target.duration) * 100)
+                }
+                onError={(e) => {
+                  const errorDetails = {
+                    message: e.target.error?.message || "Unknown error",
+                    code: e.target.error?.code || "N/A",
+                    // src: e.target.currentSrc || "N/A",
+                    // mimeType: e.target.currentType || "N/A",
+                    userAgent: navigator.userAgent,
+                  };
+                  console.error("Video playback error:", errorDetails);
+
+                  if ((isMov || isWebm) && !fallbackSrc) {
+                    const mp4Src = originalSrc.replace(/\.(mov|webm)$/i, ".mp4");
+                    console.log(`MediaItem: Falling back to ${mp4Src} for index ${index}`);
+                    setFallbackSrc(mp4Src);
+                  } else {
+                    setError({
+                      message: "Failed to play video. Please check format or URL.",
+                      details: errorDetails,
+                    });
+                  }
+                }}
+              >
+                <source
+                  src={videoSrc}
+                  type={
+                    videoSrc.toLowerCase().endsWith(".mp4")
+                      ? "video/mp4"
+                      : isMov
+                      ? "video/quicktime"
+                      : "video/webm"
+                  }
+                />
+                Your browser does not support the video tag.
+              </video>
+            )
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
+    } else if (content.content.endsWith(".pdf")) {
+      return (
+        <DocumentContent
+          content={content.content}
+          summary={content.summary}
+          getContentUrl={getContentUrl}
+          isPaused={isPaused}
+          originalFormat={content.originalFormat}
+        />
+      );
+    } else if (isYouTubeUrl(content.content)) {
+      return (
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            <YouTubeLive
+              liveUrl={contentUrl}
+              isPaused={isPaused}
+              inView={inView}
+              showControls={false}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
+    } else {
+      return (
+        <div ref={ref} className="w-full h-full">
+          {inView ? (
+            <img
+              src={contentUrl}
+              alt="Preview content"
+              className="w-full h-full object-contain"
+              loading="lazy"
+              onError={(e) => {
+                console.error("Image load error:", {
+                  src: e.target.src,
+                  content: content.content,
+                });
+                e.target.style.display = "none";
+                e.target.parentElement.innerHTML = `
+                  <div class="w-full h-full flex items-center justify-center text-white bg-gray-900">
+                    <p>Failed to load image: ${content.content}</p>
+                  </div>
+                `;
+              }}
+            />
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
+    }
   }
-});
+);
 
 const Preview = () => {
   const { url } = useParams();
@@ -314,8 +645,7 @@ const Preview = () => {
   const [allContent, setAllContent] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Format time remaining for display
-  const formatTimeRemaining = (milliseconds) => {
+  const formatTimeRemaining = useCallback((milliseconds) => {
     if (milliseconds <= 0) return "00:00:00";
     const totalSeconds = Math.floor(milliseconds / 1000);
     const hours = Math.floor(totalSeconds / 3600);
@@ -324,40 +654,49 @@ const Preview = () => {
     return `${hours.toString().padStart(2, "0")}:${minutes
       .toString()
       .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  };
+  }, []);
 
-  const formatDescription = (description) => {
-    const strippedDescription = description.replace(/<[^>]*>/g, "");
-    return strippedDescription;
-  };
+  const formatDescription = useCallback((description) => {
+    if (!description) return "";
+    return description.replace(/<[^>]*>/g, "");
+  }, []);
 
-  // Helper function to determine if a time window is active now
-  const isTimeWindowActive = (timeWindow) => {
-    if (!timeWindow || !timeWindow.startTime || !timeWindow.endTime) return true;
+  const isTimeWindowActive = useCallback((timeWindow) => {
+    if (!timeWindow || !timeWindow.startTime || !timeWindow.endTime) {
+      console.warn("Invalid time window, treated as always active:", timeWindow);
+      return true;
+    }
+
+    const timeFormat = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
+    if (!timeFormat.test(timeWindow.startTime) || !timeFormat.test(timeWindow.endTime)) {
+      console.error("Malformed time format, skipping:", timeWindow);
+      return false;
+    }
 
     const now = new Date();
     const nowTime = now.getHours() * 60 + now.getMinutes();
-
     const startTimeParts = timeWindow.startTime.split(":");
     const endTimeParts = timeWindow.endTime.split(":");
-
     const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
     const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
 
     return nowTime >= startMinutes && nowTime <= endMinutes;
-  };
+  }, []);
 
-  // Enhanced scheduled check function with displayMode and priority handling
-  const isScheduledNow = (schedule) => {
-    if (!schedule) return true;
+  const isScheduledNow = useCallback((schedule) => {
+    if (!schedule || Object.keys(schedule).length === 0) {
+      console.log("No schedule provided, content is always active");
+      return true;
+    }
 
     if (
       !schedule.startTime &&
       !schedule.endTime &&
       !schedule.startDate &&
       !schedule.endDate &&
-      !schedule.timeWindows
+      (!schedule.timeWindows || schedule.timeWindows.length === 0)
     ) {
+      console.log("No scheduling restrictions, content is always active");
       return true;
     }
 
@@ -367,19 +706,25 @@ const Preview = () => {
     let isWithinDate = true;
     if (schedule.startDate) {
       const startDate = schedule.startDate.split("T")[0];
-      isWithinDate = isWithinDate && today >= startDate;
+      isWithinDate = today >= startDate;
     }
     if (schedule.endDate) {
       const endDate = schedule.endDate.split("T")[0];
       isWithinDate = isWithinDate && today <= endDate;
     }
 
-    if (!isWithinDate) return false;
+    if (!isWithinDate) {
+      console.log("Content outside date range:", { today, startDate: schedule.startDate, endDate: schedule.endDate });
+      return false;
+    }
 
     let isWithinTimeWindow = false;
-
     if (schedule.timeWindows && schedule.timeWindows.length > 0) {
-      isWithinTimeWindow = schedule.timeWindows.some((window) => isTimeWindowActive(window));
+      isWithinTimeWindow = schedule.timeWindows.some((timeWindow) => {
+        const isActive = isTimeWindowActive(timeWindow);
+        console.log("Time window check:", { timeWindow, isActive });
+        return isActive;
+      });
     } else if (schedule.startTime && schedule.endTime) {
       const nowTime = now.getHours() * 60 + now.getMinutes();
       const startTimeParts = schedule.startTime.split(":");
@@ -387,100 +732,169 @@ const Preview = () => {
       const startMinutes = parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
       const endMinutes = parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
       isWithinTimeWindow = nowTime >= startMinutes && nowTime <= endMinutes;
+      console.log("Legacy time check:", { startTime: schedule.startTime, endTime: schedule.endTime, isWithinTimeWindow });
     } else {
       isWithinTimeWindow = true;
     }
 
     return isWithinDate && isWithinTimeWindow;
-  };
+  }, [isTimeWindowActive]);
 
-  const groupMediaByLayout = (content) => {
+  const groupMediaByLayout = useCallback((content) => {
     const groupedContent = {};
-    content.forEach((item, index) => {
-      const layoutKey = item.layout || "single";
+    (content || []).forEach((item, index) => {
+      const layoutKey = item?.layout || "single";
       if (!groupedContent[layoutKey]) {
         groupedContent[layoutKey] = [];
       }
       groupedContent[layoutKey].push({ ...item, originalIndex: index });
     });
     return groupedContent;
-  };
+  }, []);
 
-  const getActiveContent = (content) => {
-    const now = new Date();
+  const getActiveContent = useCallback((content) => {
+    if (!Array.isArray(content)) {
+      console.warn("Invalid content array, returning empty:", content);
+      return [];
+    }
 
-    const exclusiveContent = content.filter(
-      (item) => isScheduledNow(item.schedule) && item.schedule?.displayMode === "exclusive"
+    const priorityOrder = { high: 3, medium: 2, low: 1 };
+
+    // Check for exclusive, high-priority content
+    const exclusiveHighPriorityContent = content.filter(
+      (item) =>
+        item?.schedule &&
+        isScheduledNow(item.schedule) &&
+        item.schedule.displayMode === "exclusive" &&
+        item.schedule.priority === "high"
     );
 
-    if (exclusiveContent.length > 0) {
-      return exclusiveContent.sort((a, b) => {
-        const priorityOrder = { high: 3, medium: 2, low: 1 };
-        const priorityA = priorityOrder[a.schedule?.priority] || 0;
-        const priorityB = priorityOrder[b.schedule?.priority] || 0;
+    if (exclusiveHighPriorityContent.length > 0) {
+      // Warn if exclusive content has no time restrictions
+      exclusiveHighPriorityContent.forEach((item) => {
+        if (
+          (!item.schedule.timeWindows || item.schedule.timeWindows.every((tw) => !tw.startTime || !tw.endTime)) &&
+          !item.schedule.startDate &&
+          !item.schedule.endDate &&
+          !item.schedule.startTime &&
+          !item.schedule.endTime
+        ) {
+          console.warn("Exclusive high-priority content has no time restrictions, may override others:", item);
+        }
+      });
+      console.log("Exclusive high-priority content active:", exclusiveHighPriorityContent);
+      return exclusiveHighPriorityContent.sort((a, b) => {
+        const priorityA = priorityOrder[a.schedule?.priority || "low"] || 0;
+        const priorityB = priorityOrder[b.schedule?.priority || "low"] || 0;
         return priorityB - priorityA;
       });
     }
 
-    const activeContent = content.filter((item) => isScheduledNow(item.schedule));
+    // Fallback to all active content
+    const activeContent = content.filter(
+      (item) => item?.schedule && isScheduledNow(item.schedule)
+    );
 
+    console.log("Normal active content:", activeContent);
     return activeContent.sort((a, b) => {
-      const priorityOrder = { high: 3, medium: 2, low: 1 };
-      const priorityA = priorityOrder[a.schedule?.priority] || 0;
-      const priorityB = priorityOrder[b.schedule?.priority] || 0;
+      const priorityA = priorityOrder[a.schedule?.priority || "low"] || 0;
+      const priorityB = priorityOrder[b.schedule?.priority || "low"] || 0;
       return priorityB - priorityA;
     });
-  };
+  }, [isScheduledNow]);
 
-  const preloadMedia = (content) => {
-    content.slice(0, 5).forEach((item) => {
-      if (item.content) {
+  const getContentUrl = useCallback((content) => {
+    if (!content) return "";
+    const prefix = "/api/upload/preview/";
+    if (content.startsWith(prefix)) {
+      return content.slice(prefix.length);
+    }
+    if (isYouTubeUrl(content)) {
+      return getYouTubeEmbedUrl(content);
+    }
+    return content.startsWith("http") ? content : `${apiBaseUrl}/${content}`;
+  }, []);
+
+  const preloadMedia = useCallback((content) => {
+    (content || []).slice(0, 3).forEach((item) => {
+      if (item?.content) {
         const url = getContentUrl(item.content);
         const link = document.createElement("link");
         link.rel = "preload";
         link.href = url;
-        link.as = item.content.endsWith(".mp4") ? "video" : "image";
+        link.as = videoExtensions.some((video) => item.content.toLowerCase().endsWith(video.ext))
+          ? "video"
+          : item.content.endsWith(".pdf")
+          ? "fetch"
+          : "image";
+        link.onerror = () => console.error(`Preload failed for ${url}`);
         document.head.appendChild(link);
       }
     });
-  };
+  }, [getContentUrl]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const cacheKey = `preview_${url}`;
     const cachedData = localStorage.getItem(cacheKey);
     if (cachedData) {
-      const parsedData = JSON.parse(cachedData);
-      setMediaContent(getActiveContent(parsedData.url_content || []));
-      setIsEnabled(parsedData.isEnabled);
-      setScheduledAt(parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null);
-      setExpiresAt(parsedData.expiresAt ? new Date(parsedData.expiresAt) : null);
-      setCustomTicker(parsedData.custom_ticker || null);
+      try {
+        const parsedData = JSON.parse(cachedData);
+        const activeContent = getActiveContent(parsedData.url_content || []);
+        setMediaContent(activeContent);
+        console.log("Loaded cached content:", activeContent);
+        setIsEnabled(parsedData.isEnabled ?? true);
+        setScheduledAt(
+          parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null
+        );
+        setExpiresAt(
+          parsedData.expiresAt ? new Date(parsedData.expiresAt) : null
+        );
+        setCustomTicker(parsedData.custom_ticker || null);
+        if (activeContent.length > 0) {
+          setCurrentIndex(0);
+          const firstLayout = activeContent[0].layout || "single";
+          setCurrentLayout(firstLayout);
+          const groupedContent = groupMediaByLayout(activeContent);
+          updateVisibleItems(firstLayout, groupedContent, 0);
+        }
+      } catch (error) {
+        console.error("Error parsing cached data:", error);
+      }
     }
-  
+
     setIsLoading(true);
     try {
-      const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`);
+      const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`, {
+        timeout: 10000,
+      });
       if (response.data) {
         localStorage.setItem(cacheKey, JSON.stringify(response.data));
         const content = response.data.url_content || [];
         setAllContent(content);
         const activeContent = getActiveContent(content);
         setMediaContent(activeContent);
+        console.log("Fetched content:", activeContent);
         if (activeContent.length > 0) {
+          setCurrentIndex(0);
           const firstLayout = activeContent[0].layout || "single";
           setCurrentLayout(firstLayout);
-          setCurrentIndex(0);
           const groupedContent = groupMediaByLayout(activeContent);
           updateVisibleItems(firstLayout, groupedContent, 0);
           preloadMedia(activeContent);
         } else {
+          console.warn("No active content available, using fallback");
           setVisibleItems([fallbackItem]);
         }
-        setIsEnabled(response.data.isEnabled);
-        setScheduledAt(response.data.scheduledAt ? new Date(response.data.scheduledAt) : null);
-        setExpiresAt(response.data.expiresAt ? new Date(response.data.expiresAt) : null);
+        setIsEnabled(response.data.isEnabled ?? true);
+        setScheduledAt(
+          response.data.scheduledAt ? new Date(response.data.scheduledAt) : null
+        );
+        setExpiresAt(
+          response.data.expiresAt ? new Date(response.data.expiresAt) : null
+        );
         setCustomTicker(response.data.custom_ticker || null);
       } else {
+        console.warn("No data in response, using fallback");
         setVisibleItems([fallbackItem]);
       }
     } catch (error) {
@@ -489,32 +903,40 @@ const Preview = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [url, getActiveContent, groupMediaByLayout, preloadMedia]);
 
-  const fetchWeather = async (location = "Mumbai") => {
+  const fetchWeather = useCallback(async (location = "Mumbai") => {
     if (!weatherApiKey) {
       console.error("Weather API key is missing.");
       return;
     }
     const now = Date.now();
-    if (cache.weather.data && cache.weather.timestamp && now - cache.weather.timestamp < cache.weather.ttl) {
+    if (
+      cache.weather.data &&
+      cache.weather.timestamp &&
+      now - cache.weather.timestamp < cache.weather.ttl
+    ) {
       setWeather(cache.weather.data);
       return;
     }
     try {
       const url = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${location}&aqi=yes`;
-      const response = await axios.get(url);
+      const response = await axios.get(url, { timeout: 5000 });
       cache.weather.data = response.data;
       cache.weather.timestamp = now;
       setWeather(response.data);
     } catch (error) {
       console.error("Error fetching weather:", error);
     }
-  };
+  }, []);
 
-  const fetchNews = async () => {
+  const fetchNews = useCallback(async () => {
     const now = Date.now();
-    if (cache.news.data && cache.news.timestamp && now - cache.news.timestamp < cache.news.ttl) {
+    if (
+      cache.news.data &&
+      cache.news.timestamp &&
+      now - cache.news.timestamp < cache.news.ttl
+    ) {
       setNews(cache.news.data);
       return;
     }
@@ -528,54 +950,69 @@ const Preview = () => {
       const responses = await Promise.all(
         feeds.map((feed) =>
           axios
-            .get(`${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feed)}`)
+            .get(
+              `${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feed)}`,
+              { timeout: 5000 }
+            )
             .then((res) => res.data.items || [])
             .catch(() => [])
         )
       );
       const rssArticles = responses.flat().slice(0, 8);
       let articles = rssArticles;
-      if (rssArticles.length === 0) {
+      if (rssArticles.length === 0 && newsApiKey) {
         const fallbackResponse = await axios.get(
-          `https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`
+          `https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`,
+          { timeout: 5000 }
         );
         articles = fallbackResponse.data.articles.slice(0, 8);
       }
       cache.news.data = articles;
-      cache.weather.timestamp = now;
+      cache.news.timestamp = now;
       setNews(articles);
     } catch (error) {
       console.error("Error fetching news:", error);
       setNews([]);
     }
-  };
+  }, []);
 
-  const updateVisibleItems = (layout, groupedContent, index) => {
-    const layoutConfig = layoutOptions.find((option) => option.id === layout) || layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const allItems = mediaContent.length > 0
-      ? mediaContent.map((item, idx) => ({ ...item, originalIndex: idx }))
-      : [fallbackItem];
+  const updateVisibleItems = useCallback(
+    (layout, groupedContent, index) => {
+      const layoutConfig =
+        layoutOptions.find((option) => option.id === layout) || layoutOptions[0];
+      const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+      const allItems =
+        mediaContent.length > 0
+          ? mediaContent.map((item, idx) => ({ ...item, originalIndex: idx }))
+          : [fallbackItem];
 
-    if (index >= allItems.length) {
-      setVisibleItems([fallbackItem]);
-      return;
-    }
+      if (index >= allItems.length || index < 0) {
+        console.warn("Index out of bounds, using fallback", {
+          index,
+          total: allItems.length,
+        });
+        setVisibleItems([fallbackItem]);
+        return;
+      }
 
-    const currentItem = allItems[index];
-    const currentLayout = currentItem?.layout || "single";
-
-    if (currentLayout !== layout) {
+      const currentItem = allItems[index] || fallbackItem;
+      const currentLayout = currentItem.layout || "single";
       setCurrentLayout(currentLayout);
-    }
 
-    const start = index;
-    const end = Math.min(start + itemsPerPage, allItems.length);
-    const itemsToDisplay = allItems.slice(start, end);
-    setVisibleItems(itemsToDisplay.length > 0 ? itemsToDisplay : [fallbackItem]);
-  };
+      if (currentLayout !== layout) {
+        setCurrentLayout(currentLayout);
+      }
 
-  const getUserLocation = () => {
+      const start = index;
+      const end = Math.min(start + itemsPerPage, allItems.length);
+      const itemsToDisplay = allItems.slice(start, end);
+      console.log("Updating visible items:", { layout, index, itemsToDisplay });
+      setVisibleItems(itemsToDisplay.length > 0 ? itemsToDisplay : [fallbackItem]);
+    },
+    [mediaContent]
+  );
+
+  const getUserLocation = useCallback(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -591,8 +1028,108 @@ const Preview = () => {
       console.error("Geolocation is not supported by this browser.");
       fetchWeather("Mumbai");
     }
-  };
+  }, [fetchWeather]);
 
+  const isWebpageUrl = useCallback(
+    (url) => {
+      if (!url) return false;
+      const excludedExtensions = [
+        ...videoExtensions.map((video) => video.ext),
+        ".pdf",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+      ];
+      const hasExcludedExtension = excludedExtensions.some((ext) =>
+        url.toLowerCase().endsWith(ext)
+      );
+      const isSpecialUrl = isPowerBIUrl(url) || isYouTubeLiveUrl(url);
+      return (
+        (url.startsWith("http://") || url.startsWith("https://")) &&
+        !isSpecialUrl &&
+        !hasExcludedExtension
+      );
+    },
+    []
+  );
+
+  console.log(currentLayout , "   currentLayout");
+  
+  const getGridClasses = useCallback(() => {
+    switch (currentLayout) {
+      case "2x1":
+        return "grid-cols-2 grid-rows-1";
+      case "1x2":
+        return "grid-cols-1 grid-rows-2";
+      case "2x2":
+        return "grid-cols-2 grid-rows-2";
+      case "3x1":
+        return "grid-cols-3 grid-rows-1";
+      case "1x3":
+        return "grid-cols-1 grid-rows-3";
+      case "single":
+      default:
+        return "grid-cols-1 grid-rows-1";
+    }
+  }, [currentLayout]);
+
+  const isAnyPowerBIContent = useCallback(() => {
+    return visibleItems.some((item) => item?.content && isPowerBIUrl(item.content));
+  }, [visibleItems]);
+
+  const togglePlayPause = useCallback(() => {
+    setIsPaused((prev) => {
+      console.log(`Toggling slideshow to ${!prev ? "paused" : "playing"}`);
+      return !prev;
+    });
+    setShowControls(true);
+  }, []);
+
+  const goNext = useCallback(() => {
+    const currentItem = mediaContent[currentIndex] || fallbackItem;
+    const layoutConfig =
+      layoutOptions.find((option) => option.id === (currentItem.layout || "single")) ||
+      layoutOptions[0];
+    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+    const nextIndex = currentIndex + itemsPerPage;
+    const groupedContent = groupMediaByLayout(
+      mediaContent.length > 0 ? mediaContent : [fallbackItem]
+    );
+    if (nextIndex >= mediaContent.length && mediaContent.length > 0) {
+      setCurrentIndex(0);
+      const firstLayout = mediaContent[0]?.layout || "single";
+      setCurrentLayout(firstLayout);
+      updateVisibleItems(firstLayout, groupedContent, 0);
+    } else if (mediaContent.length === 0) {
+      setVisibleItems([fallbackItem]);
+    } else {
+      setCurrentIndex(nextIndex);
+      const nextItem = mediaContent[nextIndex] || fallbackItem;
+      const nextLayout = nextItem.layout || "single";
+      setCurrentLayout(nextLayout);
+      updateVisibleItems(nextLayout, groupedContent, nextIndex);
+    }
+    setShowControls(true);
+  }, [mediaContent, currentIndex, groupMediaByLayout, updateVisibleItems]);
+
+  const goPrev = useCallback(() => {
+    const currentItem = mediaContent[currentIndex] || fallbackItem;
+    const layoutConfig =
+      layoutOptions.find((option) => option.id === (currentItem.layout || "single")) ||
+      layoutOptions[0];
+    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+    const prevIndex = Math.max(0, currentIndex - itemsPerPage);
+    const groupedContent = groupMediaByLayout(
+      mediaContent.length > 0 ? mediaContent : [fallbackItem]
+    );
+    setCurrentIndex(prevIndex);
+    const prevItem = mediaContent[prevIndex] || fallbackItem;
+    const prevLayout = prevItem.layout || "single";
+    setCurrentLayout(prevLayout);
+    updateVisibleItems(prevLayout, groupedContent, prevIndex);
+    setShowControls(true);
+  }, [mediaContent, currentIndex, groupMediaByLayout, updateVisibleItems]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -601,6 +1138,7 @@ const Preview = () => {
         await Promise.all([fetchData(), fetchWeather(), fetchNews()]);
       } catch (error) {
         console.error("Error loading data:", error);
+        setVisibleItems([fallbackItem]);
       } finally {
         setIsLoading(false);
       }
@@ -608,7 +1146,7 @@ const Preview = () => {
     loadData();
     const refreshInterval = setInterval(fetchData, 5 * 60 * 1000);
     return () => clearInterval(refreshInterval);
-  }, [url]);
+  }, [fetchData, fetchWeather, fetchNews]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -619,15 +1157,15 @@ const Preview = () => {
 
   useEffect(() => {
     getUserLocation();
-  }, []);
+  }, [getUserLocation]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       setDateTime(new Date());
       if (allContent.length > 0) {
         const newActiveContent = getActiveContent(allContent);
-        setMediaContent(newActiveContent);
         if (JSON.stringify(newActiveContent) !== JSON.stringify(mediaContent)) {
+          setMediaContent(newActiveContent);
           setCurrentIndex(0);
           if (newActiveContent.length > 0) {
             const firstLayout = newActiveContent[0].layout || "single";
@@ -635,13 +1173,14 @@ const Preview = () => {
             const groupedContent = groupMediaByLayout(newActiveContent);
             updateVisibleItems(firstLayout, groupedContent, 0);
           } else {
+            console.warn("No new active content, using fallback");
             setVisibleItems([fallbackItem]);
           }
         }
       }
     }, 60000);
     return () => clearInterval(timer);
-  }, [allContent, mediaContent]);
+  }, [allContent, mediaContent, getActiveContent, groupMediaByLayout, updateVisibleItems]);
 
   useEffect(() => {
     const now = new Date();
@@ -682,176 +1221,107 @@ const Preview = () => {
       setCountdownType(null);
     }
     if (!isEnabled && visibleItems.length === 0) {
+      console.warn("Preview disabled, using fallback");
       setVisibleItems([fallbackItem]);
     }
-  }, [scheduledAt, expiresAt, isEnabled]);
+  }, [scheduledAt, expiresAt, isEnabled, fetchData]);
 
   useEffect(() => {
-    if (mediaContent.length > 0 && isEnabled) {
-      if (!isPaused) {
-        setActiveSlideshow(true);
-        const currentItemIndex = currentIndex % mediaContent.length;
-        const currentItem = mediaContent[currentItemIndex];
-        const currentLayout = currentItem?.layout || "single";
-        setCurrentLayout(currentLayout);
-        const layoutConfig = layoutOptions.find((option) => option.id === currentLayout) || layoutOptions[0];
-        const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-        const delay = currentItem?.time * 1000 || 15000;
-        const groupedContent = groupMediaByLayout(mediaContent);
-        updateVisibleItems(currentLayout, groupedContent, currentIndex);
-
-        const timer = setTimeout(() => {
-          const nextIndex = currentIndex + itemsPerPage;
-          if (nextIndex >= mediaContent.length) {
-            setCurrentIndex(0);
-            const firstLayout = mediaContent[0]?.layout || "single";
-            setCurrentLayout(firstLayout);
-            updateVisibleItems(firstLayout, groupedContent, 0);
-          } else {
-            setCurrentIndex(nextIndex);
-            const nextItem = mediaContent[nextIndex];
-            const nextLayout = nextItem?.layout || "single";
-            setCurrentLayout(nextLayout);
-            updateVisibleItems(nextLayout, groupedContent, nextIndex);
-          }
-        }, delay);
-        return () => clearTimeout(timer);
-      } else {
-        setActiveSlideshow(false);
-      }
-    } else {
+    if (mediaContent.length === 0 || !isEnabled || isPaused) {
       setActiveSlideshow(false);
-      if (visibleItems.length === 0 || visibleItems[0] === fallbackItem) {
+      if (mediaContent.length === 0 || !isEnabled) {
+        console.warn("No media content or disabled, using fallback");
         setVisibleItems([fallbackItem]);
       }
+      return;
     }
-  }, [mediaContent, currentIndex, isPaused, isEnabled]);
-
-  useEffect(() => {
-    Object.keys(videoRefs.current).forEach((index) => {
-      const video = videoRefs.current[index];
-      if (video) {
-        isPaused ? video.pause() : video.play();
-      }
-    });
-  }, [isPaused]);
-
-  const togglePlayPause = () => {
-    setIsPaused((prev) => !prev);
-    setShowControls(true);
-    // autoHideControls();
-  };
-  useEffect(() => {
-    const handleMouseMove = () => {
-      setShowControls(true);
-      // autoHideControls(); // Auto-hide controls after showing
-    };
-
-    // Add event listener for mouse movement
-    window.addEventListener("mousemove", handleMouseMove);
-
-    // Cleanup event listener on component unmount
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-    };
-  }, []);
-
-  const goNext = () => {
-    const currentItem = mediaContent[currentIndex] || fallbackItem;
-    const layoutConfig =
-      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) || layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const nextIndex = currentIndex + itemsPerPage;
-    const groupedContent = groupMediaByLayout(mediaContent.length > 0 ? mediaContent : [fallbackItem]);
-    if (nextIndex >= mediaContent.length && mediaContent.length > 0) {
-      setCurrentIndex(0);
-      const firstLayout = mediaContent[0]?.layout || "single";
-      setCurrentLayout(firstLayout);
-      updateVisibleItems(firstLayout, groupedContent, 0);
-    } else if (mediaContent.length === 0) {
+  
+    setActiveSlideshow(true);
+    const currentItemIndex = currentIndex % mediaContent.length;
+    const currentItem = mediaContent[currentItemIndex] || fallbackItem;
+    if (!currentItem || !Number.isFinite(currentItem.time) || currentItem.time <= 0) {
+      console.warn("Invalid current item or time, using fallback", {
+        currentIndex,
+        item: currentItem,
+      });
       setVisibleItems([fallbackItem]);
-    } else {
-      setCurrentIndex(nextIndex);
-      const nextItem = mediaContent[nextIndex];
-      const nextLayout = nextItem?.layout || "single";
-      setCurrentLayout(nextLayout);
-      updateVisibleItems(nextLayout, groupedContent, nextIndex);
+      return;
     }
-    setShowControls(true);
-    // autoHideControls();
-  };
-
-  const goPrev = () => {
-    const currentItem = mediaContent[currentIndex] || fallbackItem;
+  
+    const currentLayout = currentItem.layout || "single";
+    setCurrentLayout(currentLayout);
     const layoutConfig =
-      layoutOptions.find((option) => option.id === (currentItem?.layout || "single")) || layoutOptions[0];
+      layoutOptions.find((option) => option.id === currentLayout) || layoutOptions[0];
     const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const prevIndex = Math.max(0, currentIndex - itemsPerPage);
-    const groupedContent = groupMediaByLayout(mediaContent.length > 0 ? mediaContent : [fallbackItem]);
-    setCurrentIndex(prevIndex);
-    const prevItem = mediaContent[prevIndex] || fallbackItem;
-    const prevLayout = prevItem?.layout || "single";
-    setCurrentLayout(prevLayout);
-    updateVisibleItems(prevLayout, groupedContent, prevIndex);
-    setShowControls(true);
-    // autoHideControls();
-  };
+    const delay = currentItem.time * 1000;
+    const groupedContent = groupMediaByLayout(mediaContent);
+    updateVisibleItems(currentLayout, groupedContent, currentIndex);
+  
+    const timer = setTimeout(() => {
+      const nextIndex = currentIndex + itemsPerPage;
+      if (nextIndex >= mediaContent.length) {
+        // Completed one full loop, reset to index 0 and trigger API call
+        setCurrentIndex(0);
+        const firstLayout = mediaContent[0]?.layout || "single";
+        setCurrentLayout(firstLayout);
+        updateVisibleItems(firstLayout, groupedContent, 0);
+        console.log("Completed one loop, fetching new data");
+        fetchData(); // Call API to refresh content
+      } else {
+        // Move to next set of items
+        setCurrentIndex(nextIndex);
+        const nextItem = mediaContent[nextIndex] || fallbackItem;
+        const nextLayout = nextItem.layout || "single";
+        setCurrentLayout(nextLayout);
+        updateVisibleItems(nextLayout, groupedContent, nextIndex);
+      }
+    }, delay);
+  
+    return () => {
+      console.log("Clearing slideshow timer");
+      clearTimeout(timer);
+    };
+  }, [
+    mediaContent,
+    currentIndex,
+    isPaused,
+    isEnabled,
+    groupMediaByLayout,
+    updateVisibleItems,
+    fetchData, // Add fetchData to dependencies
+  ]);
 
-  const autoHideControls = () => {
-    setTimeout(() => setShowControls(false), 2500);
-  };
-
-  const getContentUrl = (content) => {
-    const prefix = "/api/upload/preview/";
-    if (content.startsWith(prefix)) {
-      return content.slice(prefix.length);
-    }
-    return content.startsWith("http") ? content : `${apiBaseUrl}/${content}`;
-  };
-
-  const isWebpageUrl = (url) => {
-    if (!url) return false;
-    const excludedExtensions = [".mp4", ".pdf", ".ppt", ".pptx", ".doc", ".docx", ".jpg", ".jpeg", ".png", ".gif"];
-    const hasExcludedExtension = excludedExtensions.some((ext) => url.toLowerCase().endsWith(ext));
-    const isSpecialUrl = isPowerBIUrl(url) || isYouTubeLiveUrl(url);
-    return (url.startsWith("http://") || url.startsWith("https://")) && !isSpecialUrl && !hasExcludedExtension;
-  };
-
-  const getGridClasses = () => {
-    switch (currentLayout) {
-      case "2x1":
-        return "grid-cols-2 grid-rows-1";
-      case "1x2":
-        return "grid-cols-1 grid-rows-2";
-      case "2x2":
-        return "grid-cols-2 grid-rows-2";
-      case "3x1":
-        return "grid-cols-3 grid-rows-1";
-      case "1x3":
-        return "grid-cols-1 grid-rows-3";
-      case "single":
-      default:
-        return "grid-cols-1 grid-rows-1";
-    }
-  };
-
-  const isAnyPowerBIContent = () => {
-    return visibleItems.some((item) => item && isPowerBIUrl(item.content));
-  };
+  useEffect(() => {
+    const handleMouseMove = () => setShowControls(true);
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   return (
     <div
       className="relative flex justify-center items-center w-screen h-screen bg-black overflow-hidden"
-      onClick={togglePlayPause}
     >
       {isLoading ? (
-        renderFallbackUI("Wait, your content is loading", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "Wait, your content is loading",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       ) : !isEnabled ? (
-        renderFallbackUI("This URL is currently inactive.", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "This URL is currently inactive.",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       ) : mediaContent.length > 0 ? (
         <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
           {visibleItems.map((item, index) => (
-            <div key={index} className="relative w-full h-full bg-gray-900 rounded overflow-hidden">
+            <div
+              key={index}
+              className="relative w-full h-full bg-gray-900 rounded overflow-hidden"
+            >
               <MediaItem
                 content={item}
                 index={currentIndex + index}
@@ -865,21 +1335,32 @@ const Preview = () => {
           ))}
         </div>
       ) : (
-        renderFallbackUI("This URL has no content to display.", countdownType, timeRemaining, formatTimeRemaining)
+        renderFallbackUI(
+          "This URL has no content to display. Please check the URL or content configuration.",
+          countdownType,
+          timeRemaining,
+          formatTimeRemaining
+        )
       )}
 
       {isEnabled && countdownType === "end" && (
         <div className="absolute top-4 right-4 bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <FaClock size={20} className="text-red-400" />
-            <span className="font-mono">{formatTimeRemaining(timeRemaining)}</span>
+            <span className="font-mono">
+              {formatTimeRemaining(timeRemaining)}
+            </span>
           </div>
         </div>
       )}
 
       {weather && (
         <div className="absolute bottom-0 left-0 bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm flex items-center gap-2">
-          <img src={`https:${weather.current.condition.icon}`} alt="Weather Icon" className="w-10 h-10" />
+          <img
+            src={`https:${weather.current.condition.icon}`}
+            alt="Weather Icon"
+            className="w-10 h-10"
+          />
           <div>
             <h3 className="text-xl font-semibold">{weather.location.name}</h3>
             <p className="text-lg">
@@ -923,7 +1404,9 @@ const Preview = () => {
           <div className="news-ticker-container relative w-full">
             <div className="news-ticker">
               {customTicker ? (
-                <span className="news-item inline-block px-6 text-white text-lg">{customTicker}</span>
+                <span className="news-item inline-block px-6 text-white text-lg">
+                  {customTicker}
+                </span>
               ) : (
                 <>
                   {news.map((article, index) => (
@@ -931,7 +1414,8 @@ const Preview = () => {
                       key={`news-item-1-${index}`}
                       className="news-item inline-block px-6 text-white text-lg"
                     >
-                      <strong>{article.title}</strong> - {formatDescription(article.description)}
+                      <strong>{article.title}</strong> -{" "}
+                      {formatDescription(article.description)}
                     </span>
                   ))}
                   {news.map((article, index) => (
@@ -939,7 +1423,8 @@ const Preview = () => {
                       key={`news-item-2-${index}`}
                       className="news-item inline-block px-6 text-white text-lg"
                     >
-                      <strong>{article.title}</strong> - {formatDescription(article.description)}
+                      <strong>{article.title}</strong> -{" "}
+                      {formatDescription(article.description)}
                     </span>
                   ))}
                 </>
@@ -949,37 +1434,40 @@ const Preview = () => {
         </div>
       )}
 
-      {showControls && isEnabled && mediaContent.length > 0 && !isAnyPowerBIContent() && (
-        <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              goPrev();
-            }}
-          >
-            <FaChevronLeft size={25} />
-          </button>
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              togglePlayPause();
-            }}
-          >
-            {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
-          </button>
-          <button
-            className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-            onClick={(e) => {
-              e.stopPropagation();
-              goNext();
-            }}
-          >
-            <FaChevronRight size={25} />
-          </button>
-        </div>
-      )}
+      {showControls &&
+        isEnabled &&
+        mediaContent.length > 0 &&
+        !isAnyPowerBIContent() && (
+          <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                goPrev();
+              }}
+            >
+              <FaChevronLeft size={25} />
+            </button>
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                togglePlayPause();
+              }}
+            >
+              {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
+            </button>
+            <button
+              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
+              onClick={(e) => {
+                e.stopPropagation();
+                goNext();
+              }}
+            >
+              <FaChevronRight size={25} />
+            </button>
+          </div>
+        )}
     </div>
   );
 };
