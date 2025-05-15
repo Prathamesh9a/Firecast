@@ -9,6 +9,7 @@ import Logout from './Pages/Logout';
 import Home1 from './Pages/Home1';
 import EditUrl from './Pages/EditUrl';
 import ExistingURL from './Pages/ExistingURL';
+import Settings from './Pages/Settings';
 
 function App() {
   return (
@@ -20,10 +21,11 @@ function App() {
           <Route path="/home" element={<Home1 />} />
           <Route path="/editUrl" element={<ExistingURL />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="/register" element={<Register />} />
+          {/* <Route path="/register" element={<Register />} /> */}
           <Route path="/login" element={<Login />} />
           <Route path="/logout" element={<Logout />} />
           <Route path="/:url" element={<Preview />} />
+          <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>
     </Router>

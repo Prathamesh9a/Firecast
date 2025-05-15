@@ -19,9 +19,9 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
-    isEnabled: 
+    isEnabled:
     {
-      type:DataTypes.BOOLEAN,
+      type: DataTypes.BOOLEAN,
       allowNull: true,
     },
     scheduledAt: {
@@ -35,9 +35,29 @@ module.exports = (sequelize, DataTypes) => {
     custom_ticker: {
       type: DataTypes.STRING,
       allowNull: true
-    }
+    },
+    settings: { // New column to store settings
+      type: DataTypes.JSON,
+      allowNull: true,
+      defaultValue: {
+        ticker: {
+          speed: 500,
+          height: 48,
+          fontSize: 16,
+          visible: true,
+        },
+        dateTime: {
+          position: "top-right",
+          visible: true,
+        },
+        temperature: {
+          position: "bottom-left",
+          visible: true,
+        },
+      },
+    },
   });
- 
+
   // Associate the TickerData model with the User model
   TickerData.associate = (models) => {
     TickerData.belongsTo(models.User, { foreignKey: 'user_id' });

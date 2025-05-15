@@ -197,6 +197,7 @@ const app = express();
 const allowedOrigins = [
   `http://122.179.140.84:4012`,
   `http://122.179.140.84:86`,
+  `http://192.168.1.27:86`,
   `http://${ipAddress}:3000`,
   `http://${ipAddress}:3001`,
   `http://${ipAddress}:3002`,
@@ -238,7 +239,7 @@ const options = {
 // https.createServer(options, app).listen(6069, () => {
 //   console.log('Secure server running on https://localhost:6069');
 // });
-const PORT = 4012;
+const PORT = 4011;
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`API Gateway running on port ${PORT}`);
 });

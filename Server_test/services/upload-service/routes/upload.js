@@ -18,8 +18,8 @@ const PDFDocument = require('pdfkit');
 const secret_key = "TickerApplication";
 const encryptedLimit = 'e7ZLZFFrXSiP/1U2FOvj4w==';
 const secretUrlKey = '9ATicker';
-const baseURL = `http://122.179.140.84:86`;
-// const baseURL = `http://192.168.1.27:3000`;
+// const baseURL = `http://122.179.140.84:86`;
+const baseURL = `http://192.168.1.27:3000`;
 
 let userId;
 let username;
@@ -200,6 +200,7 @@ router.post('/upload', licenseMiddleware, (req, res) => {
     const Url_Name = req.body.Url_Name;
     const custom_ticker = req.body.custom_ticker;
     const links = Array.isArray(req.body.links) ? req.body.links : [];
+    // const settings = req.body.settings || defaultSettings; // Use defaultSettings if not provided
 
     const token = req.headers.authorization;
     if (!token) {
@@ -430,6 +431,7 @@ router.post('/upload', licenseMiddleware, (req, res) => {
         url: uniqueUrl,
         Url_Name: Url_Name,
         custom_ticker: custom_ticker,
+        // settings: settings, // Save settings
       });
 
       logger.logUserActivity(method, apiName, {
@@ -441,6 +443,7 @@ router.post('/upload', licenseMiddleware, (req, res) => {
       res.json({
         message: 'URLs and files created successfully',
         previewUrl: `${baseURL}/${uniqueUrl}`,
+        // settings: newTickerData.settings, // Return the saved settings
       });
     } catch (error) {
       console.error('Error saving data:', error);
@@ -485,7 +488,7 @@ router.patch('/updateUrlContent', async (req, res) => {
         return res.status(401).json({ message: 'Unauthorized token' });
       }
 
-      const { id, Url_Name, custom_ticker } = req.body;
+      const { id, Url_Name, custom_ticker } = req.body; // Add settings to destructuring
       const links = req.body.links || [];
       const method = req.method;
       const apiName = req.originalUrl;
@@ -765,6 +768,7 @@ router.patch('/updateUrlContent', async (req, res) => {
         Url_Name: req.body.Url_Name,
         url: req.body.Url_Name,
         custom_ticker: custom_ticker || '',
+        // settings: settings || tickerData.settings, // Update settings if provided, otherwise keep existing
       });
 
       const previewUrl = `${baseURL}/${tickerData.url}`;
@@ -783,6 +787,7 @@ router.patch('/updateUrlContent', async (req, res) => {
           user_id: tickerData.user_id,
           url_content: tickerData.url_content,
           custom_ticker: tickerData.custom_ticker,
+          // settings: tickerData.settings, // Include settings in response
           previewUrl,
         },
       });
@@ -943,7 +948,10 @@ router.post('/preview/:url', async (req, res) => {
       return res.status(404).json({ message: 'URL not found' });
     }
 
-    res.json(tickerData);
+    res.json({
+      ...tickerData.toJSON(),
+      settings: tickerData.settings, // Include settings in the response
+    });
   } catch (error) {
     logger.log('error', `Error occurred: ${error.message}`);
     res.status(500).json({ message: 'Error fetching preview content' });
@@ -1058,6 +1066,117 @@ router.get('/parse-rss', async (req, res) => {
     res.status(500).json({
       error: 'Failed to process RSS feed',
       details: error.message,
+    });
+  }
+});
+
+router.post('/saveSettings', async (req, res) => {
+  try {
+    const token = req.headers.authorization;
+    if (!token) {
+      return res.status(401).json({ message: 'Unauthorized: Token is missing' });
+    }
+
+    const tokenValue = token.startsWith('Bearer ') ? token.split(' ')[1] : token;
+    const decodedToken = jwt.verify(tokenValue, secret_key);
+    const userId = decodedToken.userId;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized: Invalid token' });
+    }
+
+    const { id, settings } = req.body;
+
+    if (!id || isNaN(id)) {
+      return res.status(400).json({ message: 'Invalid request. Please provide a valid numeric ID.' });
+    }
+
+    if (!settings || typeof settings !== 'object') {
+      return res.status(400).json({ message: 'Invalid settings. Please provide a valid settings object.' });
+    }
+
+    const tickerData = await db.TickerData.findOne({ where: { id, user_id: userId } });
+
+    if (!tickerData) {
+      return res.status(404).json({ message: `Record not found for ID ${id} and User ${userId}` });
+    }
+
+    const validPositions = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+    if (settings.dateTime && !validPositions.includes(settings.dateTime.position)) {
+      return res.status(400).json({ message: 'Invalid dateTime position' });
+    }
+    if (settings.temperature && !validPositions.includes(settings.temperature.position)) {
+      return res.status(400).json({ message: 'Invalid temperature position' });
+    }
+    if (settings.ticker) {
+      if (settings.ticker.speed < 100 || settings.ticker.speed > 600) {
+        return res.status(400).json({ message: 'Ticker speed must be between 10 and 60 seconds' });
+      }
+      if (settings.ticker.height < 30 || settings.ticker.height > 100) {
+        return res.status(400).json({ message: 'Ticker height must be between 30 and 100 pixels' });
+      }
+      if (settings.ticker.fontSize < 6 || settings.ticker.fontSize > 42) {
+        return res.status(400).json({ message: 'Ticker font size must be between 12 and 24 pixels' });
+      }
+    }
+
+    await tickerData.update({ settings });
+
+    logger.logUserActivity(req.method, req.originalUrl, {
+      user_id: userId,
+      message: `Settings updated successfully for TickerData ID ${id} by User ${userId}`,
+    });
+
+    res.json({
+      message: 'Settings updated successfully',
+      settings: tickerData.settings,
+    });
+  } catch (error) {
+    console.error('Error saving settings:', error.message);
+    logger.log('error', `Error occurred: ${error.message}`);
+    res.status(500).json({
+      message: 'Failed to save settings',
+      error: error.message,
+    });
+  }
+});
+
+router.get('/getSettings/:id', async (req, res) => {
+  const { id } = req.params;
+
+  if (isNaN(id)) {
+    return res.status(400).json({ message: 'Invalid ID. ID must be a number.' });
+  }
+
+  try {
+    const token = req.headers.authorization;
+    if (!token) {
+      return res.status(401).json({ message: 'Unauthorized: Token is missing' });
+    }
+
+    const tokenValue = token.startsWith('Bearer ') ? token.split(' ')[1] : token;
+    const decodedToken = jwt.verify(tokenValue, secret_key);
+    const userId = decodedToken.userId;
+
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized: Invalid token' });
+    }
+
+    const tickerData = await db.TickerData.findOne({ where: { id, user_id: userId } });
+
+    if (!tickerData) {
+      return res.status(404).json({ message: `Record not found for ID ${id} and User ${userId}` });
+    }
+
+    res.json({
+      settings: tickerData.settings || defaultSettings,
+    });
+  } catch (error) {
+    console.error('Error fetching settings:', error.message);
+    logger.log('error', `Error occurred: ${error.message}`);
+    res.status(500).json({
+      message: 'Error fetching settings',
+      error: error.message,
     });
   }
 });

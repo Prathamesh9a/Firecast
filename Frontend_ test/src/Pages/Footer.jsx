@@ -11,7 +11,7 @@ const Footer = () => {
                 backgroundSize: 'cover',
                 backgroundPosition: 'center',
                 position: 'fixed', // Keeps it at the bottom of the viewport
-                bottom: 0,
+                bottom: "-50px",
                 left: 0,
                 width: '100%',
                 height: '295px', // Adjust height as needed
