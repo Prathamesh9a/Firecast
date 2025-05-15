@@ -1,3 +1,3 @@
 @echo off
-cd /d D:\Firecast v1\Server
-node index1.js
+cd /d D:\Firecast\Server_test
+node index.js

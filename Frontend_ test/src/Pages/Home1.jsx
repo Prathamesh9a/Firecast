@@ -178,32 +178,73 @@ const Home1 = () => {
     WelcomeValid();
   }, []);
 
+  const scrollableContainerRef = useRef(null);
+
+
+  // const addNewGroup = () => {
+  //   setGroups([...groups, {
+  //     id: uuidv4(),
+  //     layout: 'single',
+  //     time: '',
+  //     schedule: {
+  //       startTime: '',
+  //       endTime: '',
+  //       startDate: '',
+  //       endDate: '',
+  //       frequency: 'none',
+  //       repeatInterval: 1,
+  //       repeatUntil: '',
+  //       weeklyDays: [],
+  //       monthlyRule: '',
+  //       displayMode: 'exclusive',
+  //       priority: 'medium',
+  //       timeWindows: [{ startTime: '', endTime: '' }]
+  //     },
+  //     items: [{
+  //       link: '',
+  //       file: null,
+  //       analyzeWithAI: false,
+  //     }],
+  //   }]);
+  // };
+
+
   const addNewGroup = () => {
-    setGroups([...groups, {
-      id: uuidv4(),
-      layout: 'single',
-      time: '',
-      schedule: {
-        startTime: '',
-        endTime: '',
-        startDate: '',
-        endDate: '',
-        frequency: 'none',
-        repeatInterval: 1,
-        repeatUntil: '',
-        weeklyDays: [],
-        monthlyRule: '',
-        displayMode: 'exclusive',
-        priority: 'medium',
-        timeWindows: [{ startTime: '', endTime: '' }]
-      },
-      items: [{
-        link: '',
-        file: null,
-        analyzeWithAI: false,
-      }],
-    }]);
+    setGroups(prevGroups => {
+      const newGroups = [...prevGroups, {
+        id: uuidv4(),
+        layout: 'single',
+        time: '',
+        schedule: {
+          startTime: '',
+          endTime: '',
+          startDate: '',
+          endDate: '',
+          frequency: 'none',
+          repeatInterval: 1,
+          repeatUntil: '',
+          weeklyDays: [],
+          monthlyRule: '',
+          displayMode: 'exclusive',
+          priority: 'medium',
+          timeWindows: [{ startTime: '', endTime: '' }]
+        },
+        items: [{
+          link: '',
+          file: null,
+          analyzeWithAI: false,
+        }],
+      }];
+      return newGroups;
+    });
   };
+
+
+  useEffect(() => {
+    if (scrollableContainerRef.current) {
+      scrollableContainerRef.current.scrollTop = scrollableContainerRef.current.scrollHeight;
+    }
+  }, [groups]);
 
   const deleteGroup = (groupId) => {
     if (groups.length === 1) {
@@ -244,7 +285,7 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4",   "video/x-matroska",
+      "video/mp4", "video/x-matroska",
       "video/mpeg", // CHANGE: Added video/mpeg for broader MP4 support
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -351,12 +392,12 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4",   "video/x-matroska",
+      "video/mp4", "video/x-matroska",
       "video/mpeg", // CHANGE: Added video/mpeg
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "text/plain" 
+      "text/plain"
     ];
 
     const allowedExtensions = [
@@ -746,12 +787,13 @@ const Home1 = () => {
               )}
             </div>
 
-            <div className="ml-[29%] scrollable-container w-full" style={{ maxHeight: '380px', overflowY: 'auto' }}>
+            <div ref={scrollableContainerRef} className="scrollable-container w-full" style={{ maxHeight: '220px', overflowY: 'auto', width: '700px', position: 'relative', zIndex: 1  }}>
+            
+
               {groups.map((group, groupIndex) => (
                 <div
                   key={group.id}
-                  className="mb-5 border border-gray-300 rounded-2xl bg-white p-4"
-                  style={{ width: '700px', position: 'relative', zIndex: 1 }}
+                  className="mb-5 border border-gray-300 rounded-2xl bg-white py-4 px-2 mr-2 ml-5"
                 >
 
                   <div className="flex flex-wrap items-end justify-between mb-4 gap-4">
@@ -888,7 +930,7 @@ const Home1 = () => {
                               type="number"
                               value={group.time}
                               onChange={(e) => handleTimeChange(group.id, e.target.value)}
-                              className="w-[112px] p-2 pl-8 pr-12 border border-gray-300 rounded-md text-center"
+                              className="w-[112px] p-2 pl-6 pr-8 border border-gray-300 rounded-md text-center"
                               placeholder="00"
                             />
                             <span
@@ -905,7 +947,7 @@ const Home1 = () => {
                           <button
                             onClick={() => openSchedulerModal(group.id)}
                             className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
-                            style={{ width: '80px', height: '45px' }}
+                            style={{ width: '70px', height: '45px' }}
                           >
                             {group.schedule?.startTime || group.schedule?.startDate ? (
                               <>
@@ -945,7 +987,7 @@ const Home1 = () => {
             <div>
               <button
                 className="w-full py-3 text-white font-semibold rounded-lg"
-                style={{ width: '168px', height: '48px', backgroundColor: '  #2d3748', marginTop: '20px', marginBottom: '60px', position: 'relative', zIndex: 1 }}
+                style={{ width: '168px', height: '48px', backgroundColor: '  #2d3748', marginBottom: '60px', position: 'relative', zIndex: 1 }}
                 onClick={openPreviewModal}
               >
                 Create Screen
