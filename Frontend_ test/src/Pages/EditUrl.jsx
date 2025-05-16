@@ -198,7 +198,7 @@
 //             }))
 //           : [{ startTime: "", endTime: "" }],
 //       };
-  
+
 //       return {
 //         id: uuidv4(),
 //         layout: content.layout || "single",
@@ -215,7 +215,7 @@
 //         ],
 //       };
 //     });
-  
+
 //     setCurrentEdit({
 //       ...url,
 //       groups: groups.length > 0
@@ -245,7 +245,7 @@
 //     setCustomTickerText(url.custom_ticker || "");
 //     setIsEditing(true);
 //   };
-  
+
 //   const handleBack = () => {
 //     setIsEditing(false);
 //     setShowCustomTicker(false);
@@ -262,7 +262,7 @@
 //         const decodedToken = jwtDecode(token);
 //         userId = decodedToken.userId;
 //       }
-  
+
 //       if (!currentEdit.Url_Name.trim()) {
 //         Swal.fire({
 //           title: "Oops!",
@@ -273,7 +273,7 @@
 //         setLoading(false);
 //         return;
 //       }
-  
+
 //       const links = currentEdit.groups.flatMap((group) =>
 //         group.items.map((item) => ({
 //           ...item,
@@ -287,7 +287,7 @@
 //           },
 //         }))
 //       );
-  
+
 //       for (const [index, linkItem] of links.entries()) {
 //         if (!linkItem.link && !linkItem.file) {
 //           Swal.fire({
@@ -299,7 +299,7 @@
 //           setLoading(false);
 //           return;
 //         }
-  
+
 //         if (linkItem.file) {
 //           const allowedTypes = [
 //             "image/jpeg",
@@ -339,13 +339,13 @@
 //           }
 //         }
 //       }
-  
+
 //       const formData = new FormData();
 //       formData.append("id", currentEdit.id);
 //       formData.append("Url_Name", currentEdit.Url_Name);
 //       formData.append("userId", userId);
 //       formData.append("custom_ticker", showCustomTicker ? customTickerText : "");
-  
+
 //       links.forEach((linkItem, index) => {
 //         formData.append(`links[${index}][link]`, linkItem.link);
 //         formData.append(`links[${index}][time]`, linkItem.time);
@@ -371,14 +371,14 @@
 //           formData.append(`links[${index}][fileName]`, linkItem.fileName || linkItem.file.name);
 //         }
 //       });
-  
+
 //       const response = await axios.patch(`${apiBaseUrl}/api/upload/updateUrlContent`, formData, {
 //         headers: {
 //           Authorization: token,
 //           "Content-Type": "multipart/form-data",
 //         },
 //       });
-  
+
 //       setUrls(urls.map((url) =>
 //         url.id === currentEdit.id
 //           ? { ...currentEdit, custom_ticker: showCustomTicker ? customTickerText : "", url_content: response.data.url_content }
@@ -793,13 +793,13 @@
 //     if (currentGroupId) {
 //       const layout = layoutOptions.find((l) => l.id === layoutId);
 //       const requiredItems = layout.itemCount;
-      
+
 //       setCurrentEdit({
 //         ...currentEdit,
 //         groups: currentEdit.groups.map((group) => {
 //           if (group.id === currentGroupId) {
 //             let newItems = [...group.items];
-            
+
 //             // Ensure we have exactly the required number of items for this layout
 //             if (newItems.length < requiredItems) {
 //               // Add more items if we need more
@@ -816,7 +816,7 @@
 //               // Remove excess items if we have too many
 //               newItems = newItems.slice(0, requiredItems);
 //             }
-            
+
 //             return { ...group, layout: layoutId, items: newItems };
 //           }
 //           return group;
@@ -1680,8 +1680,8 @@ const EditUrl = () => {
             // URL from backend or user input
             contentUrl =
               item.link.startsWith("http://") ||
-              item.link.startsWith("https://") ||
-              item.link.startsWith("blob:")
+                item.link.startsWith("https://") ||
+                item.link.startsWith("blob:")
                 ? item.link
                 : `${apiBaseUrl}/${item.link}`; // Prepend base URL if it's a backend path
           }
@@ -1765,9 +1765,9 @@ const EditUrl = () => {
         priority: content.schedule?.priority || "medium",
         timeWindows: content.schedule?.timeWindows?.length > 0
           ? content.schedule.timeWindows.map((tw) => ({
-              startTime: tw.startTime || "",
-              endTime: tw.endTime || "",
-            }))
+            startTime: tw.startTime || "",
+            endTime: tw.endTime || "",
+          }))
           : [{ startTime: "", endTime: "" }],
       };
 
@@ -1793,25 +1793,25 @@ const EditUrl = () => {
       groups: groups.length > 0
         ? groups
         : [
-            {
-              id: uuidv4(),
-              layout: "single",
-              time: "",
-              schedule: {
-                startDate: "",
-                endDate: "",
-                frequency: "none",
-                repeatInterval: "1",
-                repeatUntil: "",
-                weeklyDays: [],
-                monthlyRule: "",
-                displayMode: "mixed",
-                priority: "medium",
-                timeWindows: [{ startTime: "", endTime: "" }],
-              },
-              items: [{ id: uuidv4(), link: "", file: null, fileName: null, analyzeWithAI: false }],
+          {
+            id: uuidv4(),
+            layout: "single",
+            time: "",
+            schedule: {
+              startDate: "",
+              endDate: "",
+              frequency: "none",
+              repeatInterval: "1",
+              repeatUntil: "",
+              weeklyDays: [],
+              monthlyRule: "",
+              displayMode: "mixed",
+              priority: "medium",
+              timeWindows: [{ startTime: "", endTime: "" }],
             },
-          ],
+            items: [{ id: uuidv4(), link: "", file: null, fileName: null, analyzeWithAI: false }],
+          },
+        ],
     });
     setShowCustomTicker(!!url.custom_ticker);
     setCustomTickerText(url.custom_ticker || "");
@@ -2406,8 +2406,8 @@ const EditUrl = () => {
     if (content) {
       const fullUrl =
         content.startsWith("http://") ||
-        content.startsWith("https://") ||
-        content.startsWith("blob:")
+          content.startsWith("https://") ||
+          content.startsWith("blob:")
           ? content
           : `${apiBaseUrl}/${content}`;
       window.open(fullUrl, "_blank");
@@ -2543,9 +2543,8 @@ const EditUrl = () => {
     const { cols, rows } = layout;
     return (
       <div
-        className={`grid grid-cols-${cols} grid-rows-${rows} gap-1 w-full h-20 border ${
-          isSelected ? "border-blue-500" : "border-gray-300"
-        } rounded-md overflow-hidden`}
+        className={`grid grid-cols-${cols} grid-rows-${rows} gap-1 w-full h-20 border ${isSelected ? "border-blue-500" : "border-gray-300"
+          } rounded-md overflow-hidden`}
       >
         {Array(cols * rows)
           .fill(0)
@@ -2609,22 +2608,20 @@ const EditUrl = () => {
                   placeholder="Screen Name"
                   className="border-2 p-2 rounded-md bg-white w-full text-center font-bold text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-               <div className="flex flex-col items-center ml-4">
-                <div className="flex flex-row">
-  <span className="text-sm text-gray-700 whitespace-nowrap mr-2">Custom Ticker</span>
-  </div>
+                <div className="flex flex-col items-center ml-4">
+                  <div className="flex flex-row">
+                    <span className="text-sm text-gray-700 whitespace-nowrap mr-2">Custom Ticker</span>
+                  </div>
 
                   <button
                     onClick={() => setShowCustomTicker(!showCustomTicker)}
-                    className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${
-                      showCustomTicker ? "bg-green-500" : "bg-gray-400"
-                    }`}
+                    className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors duration-300 ${showCustomTicker ? "bg-green-500" : "bg-gray-400"
+                      }`}
                     aria-label={`Toggle custom ticker ${showCustomTicker ? "off" : "on"}`}
                   >
                     <div
-                      className={`w-4 h-4 bg-white rounded-full transform transition-transform duration-300 ${
-                        showCustomTicker ? "translate-x-6" : ""
-                      }`}
+                      className={`w-4 h-4 bg-white rounded-full transform transition-transform duration-300 ${showCustomTicker ? "translate-x-6" : ""
+                        }`}
                     ></div>
                   </button>
                 </div>
@@ -2828,21 +2825,20 @@ const EditUrl = () => {
                               </label>
                               <button
                                 onClick={() => openSchedulerModal(group.id)}
-                                className={`px-3 py-2 rounded-md text-sm font-medium ${
-                                  group.schedule?.startTime ||
+                                className={`px-3 py-2 rounded-md text-sm font-medium ${group.schedule?.startTime ||
+                                    group.schedule?.startDate ||
+                                    group.schedule?.timeWindows?.some(
+                                      (tw) => tw.startTime || tw.endTime
+                                    )
+                                    ? "bg-blue-100 text-blue-700 border border-blue-300"
+                                    : "bg-gray-200 text-gray-700"
+                                  }`}
+                              >
+                                {group.schedule?.startTime ||
                                   group.schedule?.startDate ||
                                   group.schedule?.timeWindows?.some(
                                     (tw) => tw.startTime || tw.endTime
-                                  )
-                                    ? "bg-blue-100 text-blue-700 border border-blue-300"
-                                    : "bg-gray-200 text-gray-700"
-                                }`}
-                              >
-                                {group.schedule?.startTime ||
-                                group.schedule?.startDate ||
-                                group.schedule?.timeWindows?.some(
-                                  (tw) => tw.startTime || tw.endTime
-                                ) ? (
+                                  ) ? (
                                   <>
                                     Edit Schedule
                                   </>
@@ -3089,11 +3085,11 @@ const EditUrl = () => {
                         urls.map((url) =>
                           url.id === currentUrlId
                             ? {
-                                ...url,
-                                isEnabled: response.data.isEnabled,
-                                scheduledAt: response.data.scheduledAt,
-                                expiresAt: response.data.expiresAt,
-                              }
+                              ...url,
+                              isEnabled: response.data.isEnabled,
+                              scheduledAt: response.data.scheduledAt,
+                              expiresAt: response.data.expiresAt,
+                            }
                             : url
                         )
                       );
@@ -3133,11 +3129,10 @@ const EditUrl = () => {
                 <button
                   key={layout.id}
                   onClick={() => selectLayout(layout.id)}
-                  className={`p-3 border rounded-md hover:bg-gray-50 ${
-                    currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
+                  className={`p-3 border rounded-md hover:bg-gray-50 ${currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
                       ? "border-blue-500 bg-blue-50"
                       : "border-gray-300"
-                  }`}
+                    }`}
                 >
                   <div className="text-sm font-medium mb-2">{layout.name}</div>
                   {renderLayoutPreview(

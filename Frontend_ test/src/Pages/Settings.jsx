@@ -3,6 +3,8 @@ import Header from "./Header";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 import Swal from "sweetalert2";
+import { useSettings } from "./SettingsContext";
+
 
 // Default settings remain unchanged
 const defaultSettings = {
@@ -21,6 +23,8 @@ const defaultSettings = {
     visible: true,
   },
 };
+
+// const { settings, setSettings } = useSettings();
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -262,8 +266,8 @@ const Settings = ({ onApplySettings }) => {
                 </label>
                 <input
                   type="range"
-                  min="30"
-                  max="100"
+                  min="50"
+                  max="80"
                   value={settings.ticker.height}
                   onChange={(e) => handleChange("ticker", "height", parseInt(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"
@@ -278,8 +282,8 @@ const Settings = ({ onApplySettings }) => {
                 </label>
                 <input
                   type="range"
-                  min="6"
-                  max="42"
+                  min="14"
+                  max="26"
                   value={settings.ticker.fontSize}
                   onChange={(e) => handleChange("ticker", "fontSize", parseInt(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"

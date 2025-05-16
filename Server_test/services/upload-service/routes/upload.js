@@ -1112,10 +1112,10 @@ router.post('/saveSettings', async (req, res) => {
       if (settings.ticker.speed < 100 || settings.ticker.speed > 600) {
         return res.status(400).json({ message: 'Ticker speed must be between 10 and 60 seconds' });
       }
-      if (settings.ticker.height < 30 || settings.ticker.height > 100) {
+      if (settings.ticker.height < 50 || settings.ticker.height > 80) {
         return res.status(400).json({ message: 'Ticker height must be between 30 and 100 pixels' });
       }
-      if (settings.ticker.fontSize < 6 || settings.ticker.fontSize > 42) {
+      if (settings.ticker.fontSize < 14 || settings.ticker.fontSize > 26) {
         return res.status(400).json({ message: 'Ticker font size must be between 12 and 24 pixels' });
       }
     }

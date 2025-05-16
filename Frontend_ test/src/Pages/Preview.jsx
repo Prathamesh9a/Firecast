@@ -3518,7 +3518,8 @@ const Preview = () => {
         >
           <div className="news-ticker-container relative w-full">
             <div
-              key={`ticker-${settings.ticker.speed}`} // Force re-render on speed change
+              // key={`ticker-${settings.ticker.speed}`} // Force re-render on speed change
+              key={`ticker-${settings.ticker.speed}-${settings.ticker.fontSize}`}
               className="news-ticker"
               style={{
                 animationName: "marquee",
@@ -3528,6 +3529,7 @@ const Preview = () => {
                 fontSize: `${settings.ticker.fontSize}px`,
               }}
             >
+              {console.log("Ticker Font Size:", settings.ticker.fontSize)}
               {customTicker ? (
                 <span className="news-item inline-block px-6 text-white">
                   {customTicker}
