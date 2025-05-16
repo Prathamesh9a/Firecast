@@ -19,6 +19,7 @@ import './styles.css';
 import Swal from 'sweetalert2';
 import 'react-toastify/dist/ReactToastify.css';
 import { v4 as uuidv4 } from 'uuid';
+import './home.css';
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -674,7 +675,7 @@ const Home1 = () => {
   return (
     <>
       <Header />
-      <div className="main-container grid grid-cols-10 gap-2 bg-gray-100 p-2" style={{ overflow: 'hidden', height: '100vh' }}>
+      <div className="grid grid-cols-10 gap-2 bg-gray-100 p-2" style={{ overflow: 'hidden', height: '100vh' }}>
         {loading && (
           <div
             className="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 bg-opacity-75 z-[9999]"
@@ -736,7 +737,7 @@ const Home1 = () => {
           </div>
         </div>
 
-        <div className="main-container col-span-8 space-y-10">
+        <div className="container col-span-8 space-y-10">
           <div className="bg-gray-100 min-h-screen p-2 justify-items-center" style={{ fontFamily: 'Outfit', height: "100%" }}>
             <div className="flex items-center justify-start mb-2">
               <IoArrowBackCircleOutline

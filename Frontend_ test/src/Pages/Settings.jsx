@@ -5,7 +5,6 @@ import { jwtDecode } from "jwt-decode";
 import Swal from "sweetalert2";
 import { useSettings } from "./SettingsContext";
 
-
 // Default settings remain unchanged
 const defaultSettings = {
   ticker: {
@@ -23,8 +22,6 @@ const defaultSettings = {
     visible: true,
   },
 };
-
-// const { settings, setSettings } = useSettings();
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -163,12 +160,10 @@ const Settings = ({ onApplySettings }) => {
     });
   };
 
-
-
   return (
     <>
-      <Header />
-      <div className="min-h-screen bg-gray-100 flex justify-center items-start py-12 px-4 sm:px-6 lg:px-8">
+      <Header className="header-fixed" />
+      <div className="min-h-screen bg-gray-100 flex justify-center items-start py-12 px-4 sm:px-6 lg:px-8 main-content">
         <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-8 transition-all duration-300">
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">
             Customize Display Settings

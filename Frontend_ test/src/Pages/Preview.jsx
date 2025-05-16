@@ -2345,24 +2345,21 @@ const MediaItem = React.memo(
         setIsLoading(false);
         return;
       }
-
+    
       setIsLoading(true);
-      setVideoReady(false); // Reset video ready state
+      setVideoReady(false);
       const video = videoRef.current;
-
+    
       const handleCanPlay = () => {
         console.log(`Video can play: ${video.src}`);
-        // Only set videoReady to true, keep isLoading true until we actually start playing
         setVideoReady(true);
         setError(null);
-        
         if (!isPaused && !requiresInteraction) {
           video.play().then(() => {
-            // Once video is actually playing, we can hide the loader
             setIsLoading(false);
           }).catch((err) => {
             console.error("Playback failed after canplay:", err);
-            setIsLoading(false); // Hide loader on error
+            setIsLoading(false);
             if (err.name === "NotAllowedError") {
               setRequiresInteraction(true);
               setError({
@@ -2383,53 +2380,65 @@ const MediaItem = React.memo(
             }
           });
         } else {
-          // For paused videos, hide the loader once we know the video can play
           setIsLoading(false);
         }
       };
-
+    
       const handleError = (e) => {
         const errorDetails = {
           message: e.target.error?.message || "Unknown video error",
           code: e.target.error?.code || "N/A",
           userAgent: navigator.userAgent,
+          src: e.target.currentSrc,
         };
+        // Ignore the error if it occurs at the end of the video (during loop)
+        if (
+          videoRef.current &&
+          videoRef.current.currentTime >= videoRef.current.duration - 0.1 // Within last 100ms
+        ) {
+          console.warn("Ignoring loop transition error:", errorDetails);
+          return;
+        }
         console.error("Video error:", errorDetails);
         setIsLoading(false);
         setVideoReady(false);
         setError({
-          message: `Video failed to load: ${errorDetails.message}`,
+          message: `Video failed to load`,
           details: errorDetails,
         });
       };
-
-      timeoutRef.current = setTimeout(() => {
-        if (isLoading) {
-          console.warn("Video loading timed out");
-          setIsLoading(false);
-          setError({
-            message: "Video took too long to load",
-            details: {
-              code: "TIMEOUT",
-              userAgent: navigator.userAgent,
-            },
-          });
-        }
-      }, 10000);
-
+    
+      const handleEnded = () => {
+        setTimeout(() => {
+          video.currentTime = 0;
+          if (!isPaused) {
+            video.play().catch((err) => {
+              console.error("Error replaying video on loop:", err);
+              setError({
+                message: `Failed to replay video: ${err.message}`,
+                details: {
+                  code: err.code || "N/A",
+                  userAgent: navigator.userAgent,
+                },
+              });
+            });
+          }
+        }, 50); // 100ms delay before restarting
+      };
+    
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
       video.addEventListener("error", handleError);
-      
-      // Additional event to ensure we catch when video actually starts playing
+      video.addEventListener("ended", handleEnded);
+    
       const handlePlaying = () => {
         console.log("Video is now playing");
         setIsLoading(false);
       };
       video.addEventListener("playing", handlePlaying);
-
+    
       video.load();
-
+    
       if (isPaused) {
         video.pause();
       } else if (videoReady && !error && !requiresInteraction) {
@@ -2447,11 +2456,12 @@ const MediaItem = React.memo(
           }
         });
       }
-
+    
       return () => {
         video.removeEventListener("canplay", handleCanPlay);
         video.removeEventListener("loadeddata", handleCanPlay);
         video.removeEventListener("error", handleError);
+        video.removeEventListener("ended", handleEnded);
         video.removeEventListener("playing", handlePlaying);
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
@@ -2502,7 +2512,7 @@ const MediaItem = React.memo(
               <video
                 ref={videoRef}
                 autoPlay={!isPaused}
-                loop
+                // loop
                 muted
                 className={`w-full h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'}`}
                 onTimeUpdate={handleTimeUpdate}
@@ -3414,8 +3424,15 @@ const Preview = () => {
         setCurrentLayout(firstLayout);
         updateVisibleItems(firstLayout, groupedContent, 0);
         console.log("Completed one loop, fetching new data");
-        // window.location.reload(); // Call API to refresh content
-        fetchData();
+    
+        // If URL is "Automate", clear the cache and hard refresh
+        if (url === "Automate") {
+          const cacheKey = `preview_${url}_${Date.now()}`; // Matches the cache key used in fetchData
+          localStorage.removeItem(cacheKey); // Clear the cache
+          window.location.reload(true); // Hard refresh the page
+        } else {
+          fetchData(); // Otherwise, just fetch new data without a hard refresh
+        }
       } else {
         // Move to next set of items
         setCurrentIndex(nextIndex);
