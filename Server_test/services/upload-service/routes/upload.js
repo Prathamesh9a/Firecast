@@ -18,8 +18,8 @@ const PDFDocument = require('pdfkit');
 const secret_key = "TickerApplication";
 const encryptedLimit = 'e7ZLZFFrXSiP/1U2FOvj4w==';
 const secretUrlKey = '9ATicker';
-// const baseURL = `http://122.179.140.84:86`;
-const baseURL = `http://192.168.1.27:3000`;
+const baseURL = `http://122.179.140.84:86`;
+//const baseURL = `http://192.168.1.27:3000`;
 
 let userId;
 let username;

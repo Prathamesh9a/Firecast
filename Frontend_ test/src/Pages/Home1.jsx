@@ -675,7 +675,7 @@ const Home1 = () => {
   return (
     <>
       <Header />
-      <div className="grid grid-cols-10 gap-2 bg-gray-100 p-2" style={{ overflow: 'hidden', height: '100vh' }}>
+      <div className="grid grid-cols-10 gap-2 bg-gray-100 p-2" style={{ overflow: 'hidden', height: '90vh' }}>
         {loading && (
           <div
             className="fixed top-0 left-0 w-full h-full flex items-center justify-center bg-gray-800 bg-opacity-75 z-[9999]"
@@ -737,9 +737,9 @@ const Home1 = () => {
           </div>
         </div>
 
-        <div className="container col-span-8 space-y-10">
-          <div className="bg-gray-100 min-h-screen p-2 justify-items-center" style={{ fontFamily: 'Outfit', height: "100%" }}>
-            <div className="flex items-center justify-start mb-2">
+        <div className="container col-span-8 space-y-10" style={{ height: '100%', overflow: 'hidden' }}>
+        <div className="bg-gray-100 p-2 justify-items-center" style={{ height: '100%', overflow: 'hidden' }}>
+        <div className="flex items-center justify-start mb-2">
               <IoArrowBackCircleOutline
                 className="w-8 h-8 mr-6 cursor-pointer hover:text-gray-500 hover:scale-110 transition duration-200"
                 onClick={handleBack}

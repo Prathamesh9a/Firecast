@@ -2265,6 +2265,407 @@ const DocumentContent = React.memo(
 );
 
 // CHANGED: Updated MediaItem to throttle onTimeUpdate and fix video glitches
+
+// const MediaItem = React.memo(
+//   ({
+//     content,
+//     index,
+//     isPaused,
+//     setProgress,
+//     getContentUrl,
+//     isWebpageUrl,
+//     videoRefs,
+//   }) => {
+//     const { ref, inView } = useInView({ triggerOnce: true });
+//     const videoRef = useRef(null);
+//     const [error, setError] = useState(null);
+//     const [fallbackSrc, setFallbackSrc] = useState(null);
+//     const [isLoading, setIsLoading] = useState(true);
+//     const [videoReady, setVideoReady] = useState(false); // New state to track when video is actually ready
+//     const [requiresInteraction, setRequiresInteraction] = useState(false);
+//     const timeoutRef = useRef(null);
+//     const lastUpdateRef = useRef(0);
+//     const throttleInterval = 500; // Update progress every 500ms
+
+//     useEffect(() => {
+//       if (
+//         videoRef.current &&
+//         content?.content &&
+//         videoExtensions.some((video) =>
+//           content.content.toLowerCase().endsWith(video.ext)
+//         )
+//       ) {
+//         videoRefs.current[index] = videoRef.current;
+//       }
+//       return () => {
+//         if (videoRefs.current[index]) {
+//           delete videoRefs.current[index];
+//         }
+//         if (timeoutRef.current) {
+//           clearTimeout(timeoutRef.current);
+//         }
+//       };
+//     }, [index, videoRefs, content]);
+
+//     const handleTimeUpdate = useCallback((e) => {
+//       const now = Date.now();
+//       if (now - lastUpdateRef.current >= throttleInterval) {
+//         setProgress((e.target.currentTime / e.target.duration) * 100);
+//         lastUpdateRef.current = now;
+//       }
+//     }, [setProgress]);
+
+//     const handleManualPlay = () => {
+//       if (videoRef.current) {
+//         videoRef.current.play().then(() => {
+//           setRequiresInteraction(false);
+//           setError(null);
+//           console.log("Video started after user interaction");
+//         }).catch((err) => {
+//           console.error("Manual play failed:", err);
+//           setError({
+//             message: `Failed to play video: ${err.message}`,
+//             details: {
+//               code: err.code || "N/A",
+//               userAgent: navigator.userAgent,
+//             },
+//           });
+//         });
+//       }
+//     };
+
+//     useEffect(() => {
+//       if (
+//         !videoRef.current ||
+//         !inView ||
+//         !content?.content ||
+//         !videoExtensions.some((video) =>
+//           content.content.toLowerCase().endsWith(video.ext)
+//         )
+//       ) {
+//         setIsLoading(false);
+//         return;
+//       }
+    
+//       setIsLoading(true);
+//       setVideoReady(false);
+//       const video = videoRef.current;
+    
+//       const handleCanPlay = () => {
+//         console.log(`Video can play: ${video.src}`);
+//         setVideoReady(true);
+//         setError(null);
+//         if (!isPaused && !requiresInteraction) {
+//           video.play().then(() => {
+//             setIsLoading(false);
+//           }).catch((err) => {
+//             console.error("Playback failed after canplay:", err);
+//             setIsLoading(false);
+//             if (err.name === "NotAllowedError") {
+//               setRequiresInteraction(true);
+//               setError({
+//                 message: "Autoplay blocked: User interaction required",
+//                 details: {
+//                   code: "NotAllowedError",
+//                   userAgent: navigator.userAgent,
+//                 },
+//               });
+//             } else {
+//               setError({
+//                 message: `Video playback failed: ${err.message}`,
+//                 details: {
+//                   code: err.code || "N/A",
+//                   userAgent: navigator.userAgent,
+//                 },
+//               });
+//             }
+//           });
+//         } else {
+//           setIsLoading(false);
+//         }
+//       };
+    
+//       const handleError = (e) => {
+//         const errorDetails = {
+//           message: e.target.error?.message || "Unknown video error",
+//           code: e.target.error?.code || "N/A",
+//           userAgent: navigator.userAgent,
+//           src: e.target.currentSrc,
+//         };
+//         // Ignore the error if it occurs at the end of the video (during loop)
+//         if (
+//           videoRef.current &&
+//           videoRef.current.currentTime >= videoRef.current.duration - 0.1 // Within last 100ms
+//         ) {
+//           console.warn("Ignoring loop transition error:", errorDetails);
+//           return;
+//         }
+//         console.error("Video error:", errorDetails);
+//         setIsLoading(false);
+//         setVideoReady(false);
+//         setError({
+//           message: `Video failed to load`,
+//           details: errorDetails,
+//         });
+//       };
+    
+//       const handleEnded = () => {
+//         setTimeout(() => {
+//           video.currentTime = 0;
+//           if (!isPaused) {
+//             video.play().catch((err) => {
+//               console.error("Error replaying video on loop:", err);
+//               setError({
+//                 message: `Failed to replay video: ${err.message}`,
+//                 details: {
+//                   code: err.code || "N/A",
+//                   userAgent: navigator.userAgent,
+//                 },
+//               });
+//             });
+//           }
+//         }, 50); // 100ms delay before restarting
+//       };
+    
+//       video.addEventListener("canplay", handleCanPlay);
+//       video.addEventListener("loadeddata", handleCanPlay);
+//       video.addEventListener("error", handleError);
+//       video.addEventListener("ended", handleEnded);
+    
+//       const handlePlaying = () => {
+//         console.log("Video is now playing");
+//         setIsLoading(false);
+//       };
+//       video.addEventListener("playing", handlePlaying);
+    
+//       video.load();
+    
+//       if (isPaused) {
+//         video.pause();
+//       } else if (videoReady && !error && !requiresInteraction) {
+//         video.play().catch((err) => {
+//           console.error("Initial playback failed:", err);
+//           if (err.name === "NotAllowedError") {
+//             setRequiresInteraction(true);
+//             setError({
+//               message: "Autoplay blocked: User interaction required",
+//               details: {
+//                 code: "NotAllowedError",
+//                 userAgent: navigator.userAgent,
+//               },
+//             });
+//           }
+//         });
+//       }
+    
+//       return () => {
+//         video.removeEventListener("canplay", handleCanPlay);
+//         video.removeEventListener("loadeddata", handleCanPlay);
+//         video.removeEventListener("error", handleError);
+//         video.removeEventListener("ended", handleEnded);
+//         video.removeEventListener("playing", handlePlaying);
+//         if (timeoutRef.current) {
+//           clearTimeout(timeoutRef.current);
+//         }
+//       };
+//     }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction]);
+
+//     if (!content || !content.content) {
+//       console.warn(`MediaItem: No content provided for index ${index}`, {
+//         content,
+//       });
+//       return (
+//         <div className="w-full h-full flex items-center justify-center text-white bg-gray-900">
+//           <p>No content available for this item.</p>
+//         </div>
+//       );
+//     }
+
+//     const contentUrl = getContentUrl(content.content);
+
+//     if (isPowerBIUrl(content.content)) {
+//       return (
+//         <iframe
+//           src={contentUrl}
+//           className="w-full h-full"
+//           title="Embedded Power BI Report"
+//           frameBorder="0"
+//           allowFullScreen
+//         />
+//       );
+//     } else if (isWebpageUrl(content.content)) {
+//       return <WebpageEmbed webpageUrl={contentUrl} />;
+//     } else if (
+//       videoExtensions.some((video) =>
+//         content.content.toLowerCase().endsWith(video.ext)
+//       )
+//     ) {
+//       const originalSrc = contentUrl;
+//       const isMov = content.content.toLowerCase().endsWith(".mov");
+//       const isWebm = content.content.toLowerCase().endsWith(".webm");
+//       const videoSrc = fallbackSrc || originalSrc;
+
+//       return (
+//         <div ref={ref} className="w-full h-full relative">
+//           {inView ? (
+//             <>
+//               {/* Video element is always rendered but only visible when not loading */}
+//               <video
+//                 ref={videoRef}
+//                 autoPlay={!isPaused}
+//                 // loop
+//                 muted
+//                 playsInline
+//                 className={`w-full h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'}`}
+//                 onTimeUpdate={handleTimeUpdate}
+//                 style={{ transition: 'opacity 0.3s ease' }}
+//               >
+//                 <source
+//                   src={videoSrc}
+//                   type={
+//                     videoSrc.toLowerCase().endsWith(".mp4")
+//                       ? "video/mp4"
+//                       : isMov
+//                       ? "video/quicktime"
+//                       : "video/webm"
+//                   }
+//                 />
+//                 Your browser does not support the video tag.
+//               </video>
+              
+//               {/* Loading overlay only shown while loading */}
+//               {isLoading && (
+//                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
+//                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
+//                 </div>
+//               )}
+              
+//               {/* Error overlay only shown on error */}
+//               {error && !isLoading && (
+//                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
+//                   <p className="text-lg font-semibold">{error.message}</p>
+//                   {error.details && (
+//                     <p className="text-sm text-gray-400 mt-2">
+//                       Error Code: {error.details.code}
+//                       <br />
+//                       Browser: {error.details.userAgent}
+//                     </p>
+//                   )}
+//                   {requiresInteraction && (
+//                     <button
+//                       onClick={handleManualPlay}
+//                       className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg flex items-center gap-2"
+//                     >
+//                       <FaPlay size={20} />
+//                       Play Video
+//                     </button>
+//                   )}
+//                   {content.thumbnail && (
+//                     <img
+//                       src={getContentUrl(content.thumbnail)}
+//                       alt="Video fallback"
+//                       className="mt-4 max-w-full max-h-64 object-contain"
+//                     />
+//                   )}
+//                 </div>
+//               )}
+//             </>
+//           ) : (
+//             <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+//               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+//             </div>
+//           )}
+//         </div>
+//       );
+//     } else if (content.content.endsWith(".pdf")) {
+//       return (
+//         <DocumentContent
+//           content={content.content}
+//           summary={content.summary}
+//           getContentUrl={getContentUrl}
+//           isPaused={isPaused}
+//           originalFormat={content.originalFormat}
+//         />
+//       );
+//     } else if (isYouTubeUrl(content.content)) {
+//       return (
+//         <div ref={ref} className="w-full h-full">
+//           {inView ? (
+//             <YouTubeLive
+//               liveUrl={contentUrl}
+//               isPaused={isPaused}
+//               inView={inView}
+//               showControls={false}
+//             />
+//           ) : (
+//             <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+//               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+//             </div>
+//           )}
+//         </div>
+//       );
+//     } else {
+//       // Image content
+//       return (
+//         <div ref={ref} className="w-full h-full relative">
+//           {inView ? (
+//             <>
+//               {/* Image is always rendered but only visible when loaded */}
+//               <img
+//                 src={contentUrl}
+//                 alt="Preview content"
+//                 className={`w-full h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'}`}
+//                 loading="lazy"
+//                 style={{ transition: 'opacity 0.3s ease' }}
+//                 onLoad={() => setIsLoading(false)}
+//                 onError={(e) => {
+//                   console.error("Image load error:", {
+//                     src: e.target.src,
+//                     content: content.content,
+//                   });
+//                   setIsLoading(false);
+//                   setError({
+//                     message: "Image failed to load",
+//                     details: {
+//                       code: "N/A",
+//                       userAgent: navigator.userAgent,
+//                     },
+//                   });
+//                 }}
+//               />
+              
+//               {/* Loading overlay */}
+//               {isLoading && (
+//                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
+//                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
+//                 </div>
+//               )}
+              
+//               {/* Error overlay */}
+//               {error && !isLoading && (
+//                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
+//                   <p className="text-lg font-semibold">{error.message}</p>
+//                   {error.details && (
+//                     <p className="text-sm text-gray-400 mt-2">
+//                       Error Code: {error.details.code}
+//                       <br />
+//                       Browser: {error.details.userAgent}
+//                     </p>
+//                   )}
+//                 </div>
+//               )}
+//             </>
+//           ) : (
+//             <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+//               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+//             </div>
+//           )}
+//         </div>
+//       );
+//     }
+//   }
+// );
+
 const MediaItem = React.memo(
   ({
     content,
@@ -2280,11 +2681,12 @@ const MediaItem = React.memo(
     const [error, setError] = useState(null);
     const [fallbackSrc, setFallbackSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [videoReady, setVideoReady] = useState(false); // New state to track when video is actually ready
+    const [videoReady, setVideoReady] = useState(false);
     const [requiresInteraction, setRequiresInteraction] = useState(false);
     const timeoutRef = useRef(null);
     const lastUpdateRef = useRef(0);
-    const throttleInterval = 500; // Update progress every 500ms
+    const throttleInterval = 500;
+    const hasResetRef = useRef(false); // Track if we've already reset in the current loop
 
     useEffect(() => {
       if (
@@ -2312,7 +2714,33 @@ const MediaItem = React.memo(
         setProgress((e.target.currentTime / e.target.duration) * 100);
         lastUpdateRef.current = now;
       }
-    }, [setProgress]);
+
+      // Check if we're within 1000ms of the end of the video
+      const video = e.target;
+      if (video.duration - video.currentTime <= 1.0 && !isPaused && !hasResetRef.current) {
+        hasResetRef.current = true; // Prevent multiple resets in the same loop
+        // Pause the video to stop playback
+        video.pause();
+        // Reset to the beginning
+        video.currentTime = 0;
+        // Resume playback after a delay
+        setTimeout(() => {
+          if (!isPaused) {
+            video.play().catch((err) => {
+              console.error("Error replaying video on pre-emptive reset:", err);
+              setError({
+                message: `Failed to replay video: ${err.message}`,
+                details: {
+                  code: err.code || "N/A",
+                  userAgent: navigator.userAgent,
+                },
+              });
+            });
+          }
+          hasResetRef.current = false; // Allow reset in the next loop
+        }, 200);
+      }
+    }, [setProgress, isPaused]);
 
     const handleManualPlay = () => {
       if (videoRef.current) {
@@ -2333,6 +2761,50 @@ const MediaItem = React.memo(
       }
     };
 
+    const handleError = useCallback((e) => {
+      const video = videoRef.current;
+      const errorDetails = {
+        message: e.target.error?.message || "Unknown video error",
+        code: e.target.error?.code || "N/A",
+        userAgent: navigator.userAgent,
+        src: e.target.currentSrc,
+      };
+
+      // If the error occurs at the end of the video, attempt to reload the video
+      if (
+        video &&
+        video.currentTime >= video.duration - 0.1
+      ) {
+        console.warn("Error at end of video, attempting to reload:", errorDetails);
+        // Reset the video source to force a full reload
+        const currentSrc = video.src;
+        video.src = ''; // Clear the source
+        video.src = currentSrc; // Reload the same source
+        video.load();
+        if (!isPaused) {
+          video.play().catch((err) => {
+            console.error("Error replaying video after reload:", err);
+            setError({
+              message: `Failed to replay video after reload: ${err.message}`,
+              details: {
+                code: err.code || "N/A",
+                userAgent: navigator.userAgent,
+              },
+            });
+          });
+        }
+        return;
+      }
+
+      console.error("Video error:", errorDetails);
+      setIsLoading(false);
+      setVideoReady(false);
+      setError({
+        message: `Video failed to load`,
+        details: errorDetails,
+      });
+    }, [isPaused]);
+
     useEffect(() => {
       if (
         !videoRef.current ||
@@ -2345,11 +2817,11 @@ const MediaItem = React.memo(
         setIsLoading(false);
         return;
       }
-    
+
       setIsLoading(true);
       setVideoReady(false);
       const video = videoRef.current;
-    
+
       const handleCanPlay = () => {
         console.log(`Video can play: ${video.src}`);
         setVideoReady(true);
@@ -2383,62 +2855,20 @@ const MediaItem = React.memo(
           setIsLoading(false);
         }
       };
-    
-      const handleError = (e) => {
-        const errorDetails = {
-          message: e.target.error?.message || "Unknown video error",
-          code: e.target.error?.code || "N/A",
-          userAgent: navigator.userAgent,
-          src: e.target.currentSrc,
-        };
-        // Ignore the error if it occurs at the end of the video (during loop)
-        if (
-          videoRef.current &&
-          videoRef.current.currentTime >= videoRef.current.duration - 0.1 // Within last 100ms
-        ) {
-          console.warn("Ignoring loop transition error:", errorDetails);
-          return;
-        }
-        console.error("Video error:", errorDetails);
-        setIsLoading(false);
-        setVideoReady(false);
-        setError({
-          message: `Video failed to load`,
-          details: errorDetails,
-        });
-      };
-    
-      const handleEnded = () => {
-        setTimeout(() => {
-          video.currentTime = 0;
-          if (!isPaused) {
-            video.play().catch((err) => {
-              console.error("Error replaying video on loop:", err);
-              setError({
-                message: `Failed to replay video: ${err.message}`,
-                details: {
-                  code: err.code || "N/A",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            });
-          }
-        }, 50); // 100ms delay before restarting
-      };
-    
+
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
       video.addEventListener("error", handleError);
-      video.addEventListener("ended", handleEnded);
-    
+      video.addEventListener("timeupdate", handleTimeUpdate);
+
       const handlePlaying = () => {
         console.log("Video is now playing");
         setIsLoading(false);
       };
       video.addEventListener("playing", handlePlaying);
-    
+
       video.load();
-    
+
       if (isPaused) {
         video.pause();
       } else if (videoReady && !error && !requiresInteraction) {
@@ -2456,18 +2886,18 @@ const MediaItem = React.memo(
           }
         });
       }
-    
+
       return () => {
         video.removeEventListener("canplay", handleCanPlay);
         video.removeEventListener("loadeddata", handleCanPlay);
         video.removeEventListener("error", handleError);
-        video.removeEventListener("ended", handleEnded);
+        video.removeEventListener("timeupdate", handleTimeUpdate);
         video.removeEventListener("playing", handlePlaying);
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
       };
-    }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction]);
+    }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction, handleTimeUpdate, handleError]);
 
     if (!content || !content.content) {
       console.warn(`MediaItem: No content provided for index ${index}`, {
@@ -2508,14 +2938,11 @@ const MediaItem = React.memo(
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              {/* Video element is always rendered but only visible when not loading */}
               <video
                 ref={videoRef}
                 autoPlay={!isPaused}
-                // loop
                 muted
                 className={`w-full h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'}`}
-                onTimeUpdate={handleTimeUpdate}
                 style={{ transition: 'opacity 0.3s ease' }}
               >
                 <source
@@ -2530,15 +2957,13 @@ const MediaItem = React.memo(
                 />
                 Your browser does not support the video tag.
               </video>
-              
-              {/* Loading overlay only shown while loading */}
+
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
                 </div>
               )}
-              
-              {/* Error overlay only shown on error */}
+
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>
@@ -2603,12 +3028,10 @@ const MediaItem = React.memo(
         </div>
       );
     } else {
-      // Image content
       return (
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              {/* Image is always rendered but only visible when loaded */}
               <img
                 src={contentUrl}
                 alt="Preview content"
@@ -2631,15 +3054,11 @@ const MediaItem = React.memo(
                   });
                 }}
               />
-              
-              {/* Loading overlay */}
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
                 </div>
               )}
-              
-              {/* Error overlay */}
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>

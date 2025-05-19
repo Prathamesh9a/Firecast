@@ -1750,43 +1750,120 @@ const EditUrl = () => {
     }
   };
 
-  const handleEdit = (url) => {
-    // Map each url_content item to its own group
-    const groups = url.url_content.map((content) => {
-      const schedule = {
-        startDate: content.schedule?.startDate || "",
-        endDate: content.schedule?.endDate || "",
-        frequency: content.schedule?.frequency || "none",
-        repeatInterval: content.schedule?.repeatInterval || "1",
-        repeatUntil: content.schedule?.repeatUntil || "",
-        weeklyDays: content.schedule?.weeklyDays || [],
-        monthlyRule: content.schedule?.monthlyRule || "",
-        displayMode: content.schedule?.displayMode || "mixed",
-        priority: content.schedule?.priority || "medium",
-        timeWindows: content.schedule?.timeWindows?.length > 0
-          ? content.schedule.timeWindows.map((tw) => ({
-            startTime: tw.startTime || "",
-            endTime: tw.endTime || "",
-          }))
-          : [{ startTime: "", endTime: "" }],
-      };
+  // const handleEdit = (url) => {
+  //   // Map each url_content item to its own group
+  //   const groups = url.url_content.map((content) => {
+  //     const schedule = {
+  //       startDate: content.schedule?.startDate || "",
+  //       endDate: content.schedule?.endDate || "",
+  //       frequency: content.schedule?.frequency || "none",
+  //       repeatInterval: content.schedule?.repeatInterval || "1",
+  //       repeatUntil: content.schedule?.repeatUntil || "",
+  //       weeklyDays: content.schedule?.weeklyDays || [],
+  //       monthlyRule: content.schedule?.monthlyRule || "",
+  //       displayMode: content.schedule?.displayMode || "mixed",
+  //       priority: content.schedule?.priority || "medium",
+  //       timeWindows: content.schedule?.timeWindows?.length > 0
+  //         ? content.schedule.timeWindows.map((tw) => ({
+  //           startTime: tw.startTime || "",
+  //           endTime: tw.endTime || "",
+  //         }))
+  //         : [{ startTime: "", endTime: "" }],
+  //     };
 
-      return {
-        id: uuidv4(),
+  //     return {
+  //       id: uuidv4(),
+  //       layout: content.layout || "single",
+  //       time: content.time || "", // Preserve the time from the content
+  //       schedule,
+  //       items: [
+  //         {
+  //           id: uuidv4(),
+  //           link: content.content || "",
+  //           file: content.file || null,
+  //           fileName: content.fileName || null,
+  //           analyzeWithAI: content.analyzeWithAI || false,
+  //         },
+  //       ],
+  //     };
+  //   });
+
+  //   setCurrentEdit({
+  //     ...url,
+  //     groups: groups.length > 0
+  //       ? groups
+  //       : [
+  //         {
+  //           id: uuidv4(),
+  //           layout: "single",
+  //           time: "",
+  //           schedule: {
+  //             startDate: "",
+  //             endDate: "",
+  //             frequency: "none",
+  //             repeatInterval: "1",
+  //             repeatUntil: "",
+  //             weeklyDays: [],
+  //             monthlyRule: "",
+  //             displayMode: "mixed",
+  //             priority: "medium",
+  //             timeWindows: [{ startTime: "", endTime: "" }],
+  //           },
+  //           items: [{ id: uuidv4(), link: "", file: null, fileName: null, analyzeWithAI: false }],
+  //         },
+  //       ],
+  //   });
+  //   setShowCustomTicker(!!url.custom_ticker);
+  //   setCustomTickerText(url.custom_ticker || "");
+  //   setIsEditing(true);
+  // };
+
+  const handleEdit = (url) => {
+    const groupedMap = {};
+
+    url.url_content.forEach((content) => {
+      const key = JSON.stringify({
         layout: content.layout || "single",
-        time: content.time || "", // Preserve the time from the content
-        schedule,
-        items: [
-          {
-            id: uuidv4(),
-            link: content.content || "",
-            file: content.file || null,
-            fileName: content.fileName || null,
-            analyzeWithAI: content.analyzeWithAI || false,
+        time: content.time || "",
+        schedule: content.schedule || {},
+      });
+
+      if (!groupedMap[key]) {
+        groupedMap[key] = {
+          id: uuidv4(),
+          layout: content.layout || "single",
+          time: content.time || "",
+          schedule: {
+            startDate: content.schedule?.startDate || "",
+            endDate: content.schedule?.endDate || "",
+            frequency: content.schedule?.frequency || "none",
+            repeatInterval: content.schedule?.repeatInterval || "1",
+            repeatUntil: content.schedule?.repeatUntil || "",
+            weeklyDays: content.schedule?.weeklyDays || [],
+            monthlyRule: content.schedule?.monthlyRule || "",
+            displayMode: content.schedule?.displayMode || "mixed",
+            priority: content.schedule?.priority || "medium",
+            timeWindows: content.schedule?.timeWindows?.length > 0
+              ? content.schedule.timeWindows.map((tw) => ({
+                startTime: tw.startTime || "",
+                endTime: tw.endTime || "",
+              }))
+              : [{ startTime: "", endTime: "" }],
           },
-        ],
-      };
+          items: [],
+        };
+      }
+
+      groupedMap[key].items.push({
+        id: uuidv4(),
+        link: content.content || "",
+        file: content.file || null,
+        fileName: content.fileName || null,
+        analyzeWithAI: content.analyzeWithAI || false,
+      });
     });
+
+    const groups = Object.values(groupedMap);
 
     setCurrentEdit({
       ...url,
@@ -1813,10 +1890,12 @@ const EditUrl = () => {
           },
         ],
     });
+
     setShowCustomTicker(!!url.custom_ticker);
     setCustomTickerText(url.custom_ticker || "");
     setIsEditing(true);
   };
+
 
   const handleBack = () => {
     setIsEditing(false);
@@ -2826,12 +2905,12 @@ const EditUrl = () => {
                               <button
                                 onClick={() => openSchedulerModal(group.id)}
                                 className={`px-3 py-2 rounded-md text-sm font-medium ${group.schedule?.startTime ||
-                                    group.schedule?.startDate ||
-                                    group.schedule?.timeWindows?.some(
-                                      (tw) => tw.startTime || tw.endTime
-                                    )
-                                    ? "bg-blue-100 text-blue-700 border border-blue-300"
-                                    : "bg-gray-200 text-gray-700"
+                                  group.schedule?.startDate ||
+                                  group.schedule?.timeWindows?.some(
+                                    (tw) => tw.startTime || tw.endTime
+                                  )
+                                  ? "bg-blue-100 text-blue-700 border border-blue-300"
+                                  : "bg-gray-200 text-gray-700"
                                   }`}
                               >
                                 {group.schedule?.startTime ||
@@ -3130,8 +3209,8 @@ const EditUrl = () => {
                   key={layout.id}
                   onClick={() => selectLayout(layout.id)}
                   className={`p-3 border rounded-md hover:bg-gray-50 ${currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
-                      ? "border-blue-500 bg-blue-50"
-                      : "border-gray-300"
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-gray-300"
                     }`}
                 >
                   <div className="text-sm font-medium mb-2">{layout.name}</div>
