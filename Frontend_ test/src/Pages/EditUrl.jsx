@@ -2836,7 +2836,7 @@ const EditUrl = () => {
                           }}
                         >
                           <div className="flex flex-wrap gap-4 items-end">
-                            <div className="flex items-center border border-gray-300 rounded-md bg-[#F7F7FF] overflow-hidden">
+                            {/* <div className="flex items-center border border-gray-300 rounded-md bg-[#F7F7FF] overflow-hidden">
                               <button
                                 type="button"
                                 className="h-8 px-4 text-white bg-[#363736] flex items-center justify-center hover:bg-blue-700"
@@ -2844,6 +2844,60 @@ const EditUrl = () => {
                                   document
                                     .getElementById(`file-input-${group.id}-${item.id}`)
                                     .click()
+                                }
+
+                                
+                              >
+                                <FaFileArrowUp className="text-lg mr-2" />
+                                <span style={{ fontFamily: "Outfit" }}>Upload</span>
+                              </button>
+                              <input
+                                type="file"
+                                className="hidden"
+                                accept="image/*,video/*,application/pdf,application/vnd.*"
+                                onChange={(e) => handleFileUpload(group.id, itemIndex, e)}
+                                id={`file-input-${group.id}-${item.id}`}
+                              />
+                              <input
+                                type="text"
+                                className="w-64 px-3 text-sm placeholder-gray-500 bg-[#F7F7FF] text-black focus:outline-none"
+                                value={item.file ? item.fileName || item.file.name : item.link}
+                                placeholder="Embedded Link or Upload"
+                                onChange={(e) => {
+                                  setCurrentEdit((prev) => ({
+                                    ...prev,
+                                    groups: prev.groups.map((g) => {
+                                      if (g.id === group.id) {
+                                        const updatedItems = [...g.items];
+                                        updatedItems[itemIndex].link = e.target.value;
+                                        updatedItems[itemIndex].file = null;
+                                        updatedItems[itemIndex].fileName = null;
+                                        return { ...g, items: updatedItems };
+                                      }
+                                      return g;
+                                    }),
+                                  }));
+                                }}
+                              />
+                            </div> */}
+
+                            <div
+                              className="flex items-center border border-gray-300 rounded-md bg-[#F7F7FF] overflow-hidden"
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                const file = e.dataTransfer.files[0];
+                                if (file) {
+                                  handleFileUpload(group.id, itemIndex, { target: { files: [file] } });
+                                }
+                              }}
+                              onDragEnter={(e) => e.preventDefault()}
+                              onDragLeave={(e) => e.preventDefault()}
+                            >
+                              <button
+                                type="button"
+                                className="h-8 px-4 text-white bg-[#363736] flex items-center justify-center hover:bg-blue-700"
+                                onClick={() =>
+                                  document.getElementById(`file-input-${group.id}-${item.id}`).click()
                                 }
                               >
                                 <FaFileArrowUp className="text-lg mr-2" />
@@ -3109,7 +3163,7 @@ const EditUrl = () => {
         )}
       </div>
 
-      {showScheduleModal && (
+      {/* {showScheduleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-lg w-96">
             <h3 className="text-xl font-bold mb-4">Schedule URL Activation</h3>
@@ -3119,18 +3173,22 @@ const EditUrl = () => {
                 <input
                   type="datetime-local"
                   className="w-full p-2 border rounded mt-1"
-                  onChange={(e) => setScheduledAt(e.target.value)}
+                  // onChange={(e) => setScheduledAt(e.target.value)}
+                  onChange={(e) => setScheduledAt(new Date(e.target.value).toISOString())}
+
                 />
               </label>
             </div>
             <div className="mb-4">
               <label className="block text-sm font-medium mb-2">
                 Schedule End (optional):
+                
                 <input
                   type="datetime-local"
                   className="w-full p-2 border rounded mt-1"
-                  onChange={(e) => setExpiresAt(e.target.value)}
+                  onChange={(e) => setScheduledAt(new Date(e.target.value).toISOString())}
                 />
+
               </label>
             </div>
             <div className="flex justify-end gap-3">
@@ -3197,7 +3255,114 @@ const EditUrl = () => {
             </div>
           </div>
         </div>
+      )} */}
+
+      const [scheduledAt, setScheduledAt] = useState(null);
+      const [expiresAt, setExpiresAt] = useState(null);
+
+      {showScheduleModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg w-96">
+            <h3 className="text-xl font-bold mb-4">Schedule URL Activation</h3>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">
+                Schedule Start (optional):
+                <input
+                  type="datetime-local"
+                  className="w-full p-2 border rounded mt-1"
+                  onChange={(e) =>
+                    setScheduledAt(new Date(e.target.value).toISOString())
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">
+                Schedule End (optional):
+                <input
+                  type="datetime-local"
+                  className="w-full p-2 border rounded mt-1"
+                  onChange={(e) =>
+                    setExpiresAt(new Date(e.target.value).toISOString())
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <button
+                className="px-4 py-2 bg-gray-500 text-white rounded"
+                onClick={() => setShowScheduleModal(false)}
+              >
+                Cancel
+              </button>
+
+              <button
+                className="px-4 py-2 bg-blue-500 text-white rounded"
+                onClick={async () => {
+                  try {
+                    const response = await axios.put(
+                      `${apiBaseUrl}/api/upload/toggleUrlStatus`,
+                      {
+                        id: currentUrlId,
+                        status: true,
+                        scheduledAt: scheduledAt || null,
+                        expiresAt: expiresAt || null,
+                      },
+                      {
+                        headers: {
+                          "Content-Type": "application/json",
+                          Authorization: token,
+                        },
+                      }
+                    );
+
+                    if (response.data) {
+                      setUrls(
+                        urls.map((url) =>
+                          url.id === currentUrlId
+                            ? {
+                              ...url,
+                              isEnabled: response.data.isEnabled,
+                              scheduledAt: response.data.scheduledAt,
+                              expiresAt: response.data.expiresAt,
+                            }
+                            : url
+                        )
+                      );
+
+                      Swal.fire({
+                        title: "Success!",
+                        text: "Screen status updated.",
+                        icon: "success",
+                        confirmButtonText: "OK",
+                      });
+                    }
+                    setShowScheduleModal(false);
+                    setScheduledAt(null);
+                    setExpiresAt(null);
+                  } catch (error) {
+                    Swal.fire({
+                      title: "Error!",
+                      text:
+                        error.response?.data?.message || "Failed to update status",
+                      icon: "error",
+                      confirmButtonText: "OK",
+                    });
+                  }
+                }}
+              >
+                Save Schedule
+              </button>
+            </div>
+          </div>
+        </div>
       )}
+
+
+
 
       {isLayoutModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">

@@ -1035,7 +1035,7 @@
 //       if (!content) return "";
 //       const prefix = "/api/upload/preview/";
 //       let baseUrl;
-  
+
 //       if (content.startsWith(prefix)) {
 //         baseUrl = content.slice(prefix.length);
 //       } else if (isYouTubeUrl(content)) {
@@ -1045,14 +1045,14 @@
 //           ? content
 //           : `${apiBaseUrl}/${content}`;
 //       }
-  
+
 //       const cacheBusterParam = `t=${cacheBuster}`;
 //       const separator = baseUrl.includes("?") ? "&" : "?";
 //       return `${baseUrl}${separator}${cacheBusterParam}`;
 //     },
 //     [url, stableCacheBuster]
 //   );
-  
+
 
 //   const preloadMedia = useCallback(
 //     (content) => {
@@ -1744,6 +1744,8 @@ import { Clock } from "lucide-react";
 import YouTubeLive from "./YouTubeLive";
 import WebpageEmbed from "./WebpageEmbed";
 import * as pdfjsLib from "pdfjs-dist";
+import { useSelector } from 'react-redux';
+
 
 // Set the worker source to the local file in the public folder
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -1783,7 +1785,7 @@ const defaultSettings = {
     visible: true,
   },
   temperature: {
-    position: "bottom-left",
+    position: "top-left",
     visible: true,
   },
 };
@@ -1795,10 +1797,16 @@ const cache = {
 };
 
 // Supported video extensions and their MIME types
+// const videoExtensions = [
+//   { ext: ".mp4", mime: "video/mp4" },
+//   { ext: ".mov", mime: "video/quicktime" },
+//   { ext: ".webm", mime: "video/webm" },
+// ];
+
 const videoExtensions = [
-  { ext: ".mp4", mime: "video/mp4" },
-  { ext: ".mov", mime: "video/quicktime" },
-  { ext: ".webm", mime: "video/webm" },
+  { ext: ".mp4", type: "video/mp4" },
+  { ext: ".mov", type: "video/quicktime" },
+  { ext: ".webm", type: "video/webm" },
 ];
 
 // Clock Component to isolate dateTime updates
@@ -2346,11 +2354,11 @@ const DocumentContent = React.memo(
 //         setIsLoading(false);
 //         return;
 //       }
-    
+
 //       setIsLoading(true);
 //       setVideoReady(false);
 //       const video = videoRef.current;
-    
+
 //       const handleCanPlay = () => {
 //         console.log(`Video can play: ${video.src}`);
 //         setVideoReady(true);
@@ -2384,7 +2392,7 @@ const DocumentContent = React.memo(
 //           setIsLoading(false);
 //         }
 //       };
-    
+
 //       const handleError = (e) => {
 //         const errorDetails = {
 //           message: e.target.error?.message || "Unknown video error",
@@ -2408,7 +2416,7 @@ const DocumentContent = React.memo(
 //           details: errorDetails,
 //         });
 //       };
-    
+
 //       const handleEnded = () => {
 //         setTimeout(() => {
 //           video.currentTime = 0;
@@ -2426,20 +2434,20 @@ const DocumentContent = React.memo(
 //           }
 //         }, 50); // 100ms delay before restarting
 //       };
-    
+
 //       video.addEventListener("canplay", handleCanPlay);
 //       video.addEventListener("loadeddata", handleCanPlay);
 //       video.addEventListener("error", handleError);
 //       video.addEventListener("ended", handleEnded);
-    
+
 //       const handlePlaying = () => {
 //         console.log("Video is now playing");
 //         setIsLoading(false);
 //       };
 //       video.addEventListener("playing", handlePlaying);
-    
+
 //       video.load();
-    
+
 //       if (isPaused) {
 //         video.pause();
 //       } else if (videoReady && !error && !requiresInteraction) {
@@ -2457,7 +2465,7 @@ const DocumentContent = React.memo(
 //           }
 //         });
 //       }
-    
+
 //       return () => {
 //         video.removeEventListener("canplay", handleCanPlay);
 //         video.removeEventListener("loadeddata", handleCanPlay);
@@ -2532,14 +2540,14 @@ const DocumentContent = React.memo(
 //                 />
 //                 Your browser does not support the video tag.
 //               </video>
-              
+
 //               {/* Loading overlay only shown while loading */}
 //               {isLoading && (
 //                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
 //                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
 //                 </div>
 //               )}
-              
+
 //               {/* Error overlay only shown on error */}
 //               {error && !isLoading && (
 //                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
@@ -2633,14 +2641,14 @@ const DocumentContent = React.memo(
 //                   });
 //                 }}
 //               />
-              
+
 //               {/* Loading overlay */}
 //               {isLoading && (
 //                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
 //                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
 //                 </div>
 //               )}
-              
+
 //               {/* Error overlay */}
 //               {error && !isLoading && (
 //                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
@@ -2687,6 +2695,48 @@ const MediaItem = React.memo(
     const lastUpdateRef = useRef(0);
     const throttleInterval = 500;
     const hasResetRef = useRef(false); // Track if we've already reset in the current loop
+    // const [socket, setSocket] = useState(null);
+    // const [messages, setMessages] = useState([]);
+    // const [inputMessage, setInputMessage] = useState('');
+
+    // useEffect(() => {
+    //   // Create WebSocket connection
+    //   // const ws = new WebSocket('ws://localhost:4068');
+    //   // const ws = new WebSocket('ws://122.179.140.84:4068');
+    //   // const ws = new WebSocket('ws://192.168.56.5:6069');
+
+
+    //   // Connection opened
+    //   // ws.onopen = () => {
+    //   //   console.log('✅ Connected to WebSocket server');
+    //   // };
+
+    //   // Listen for messages
+    //   // ws.onmessage = (event) => {
+    //   //   console.log('📩 Message from server:', event.data);
+    //   //   setMessages((prevMessages) => [...prevMessages, event.data]);
+    //   // };
+
+    //   // Handle connection close
+    //   // ws.onclose = () => {
+    //   //   console.log('❌ WebSocket connection closed');
+    //   // };
+
+    //   // Handle errors
+    //   // ws.onerror = (error) => {
+    //   //   console.error('WebSocket error:', error);
+    //   // };
+
+    //   // Save socket to state
+    //   // setSocket(ws);
+
+    //   // Cleanup on unmount
+    //   // return () => {
+    //   //   ws.close();
+    //   // };
+    // },
+    //   []);
+
 
     useEffect(() => {
       if (
@@ -2770,31 +2820,50 @@ const MediaItem = React.memo(
         src: e.target.currentSrc,
       };
 
-      // If the error occurs at the end of the video, attempt to reload the video
-      if (
-        video &&
-        video.currentTime >= video.duration - 0.1
-      ) {
-        console.warn("Error at end of video, attempting to reload:", errorDetails);
-        // Reset the video source to force a full reload
-        const currentSrc = video.src;
-        video.src = ''; // Clear the source
-        video.src = currentSrc; // Reload the same source
-        video.load();
-        if (!isPaused) {
-          video.play().catch((err) => {
-            console.error("Error replaying video after reload:", err);
-            setError({
-              message: `Failed to replay video after reload: ${err.message}`,
-              details: {
-                code: err.code || "N/A",
-                userAgent: navigator.userAgent,
-              },
+
+
+
+      if (video && video.currentTime >= video.duration - 0.1) {
+        console.warn("End of video reached. Reloading video source:", errorDetails);
+
+        try {
+          const currentSrc = video.currentSrc || video.src;
+          if (!currentSrc) {
+            throw new Error("No video source found to reload.");
+          }
+
+          video.pause();
+          video.src = ''; // Clear current source
+          video.load();    // Reset video element
+
+          video.src = currentSrc; // Re-assign the original source
+          video.load(); // Load the video again
+
+          if (!isPaused) {
+            video.play().catch((err) => {
+              console.error("Failed to autoplay after reload:", err);
+              setError({
+                message: `Failed to replay video after reload: ${err.message}`,
+                details: {
+                  code: err.code || "N/A",
+                  userAgent: navigator.userAgent,
+                },
+              });
             });
+          }
+        } catch (err) {
+          console.error("Video reload error:", err);
+          setError({
+            message: `Error while reloading video: ${err.message}`,
+            details: {
+              userAgent: navigator.userAgent,
+            },
           });
         }
+
         return;
       }
+
 
       console.error("Video error:", errorDetails);
       setIsLoading(false);
@@ -2822,39 +2891,53 @@ const MediaItem = React.memo(
       setVideoReady(false);
       const video = videoRef.current;
 
+
+      // New play function — separated
+      const attemptToPlayVideo = () => {
+        if (!video) return;
+
+        video.play().then(() => {
+          setIsLoading(false);
+        }).catch((err) => {
+          console.error("Playback failed:", err);
+          setIsLoading(false);
+
+          if (err.name === "NotAllowedError") {
+            setRequiresInteraction(true);
+            setError({
+              message: "Autoplay blocked: User interaction required",
+              details: {
+                code: "NotAllowedError",
+                userAgent: navigator.userAgent,
+              },
+            });
+          } else {
+            setError({
+              message: `Video playback failed: ${err.message}`,
+              details: {
+                code: err.code || "N/A",
+                userAgent: navigator.userAgent,
+              },
+            });
+          }
+        });
+      };
+
+      // CanPlay event handler — calls play function conditionally
       const handleCanPlay = () => {
+        if (!video) return;
+
         console.log(`Video can play: ${video.src}`);
         setVideoReady(true);
         setError(null);
+
         if (!isPaused && !requiresInteraction) {
-          video.play().then(() => {
-            setIsLoading(false);
-          }).catch((err) => {
-            console.error("Playback failed after canplay:", err);
-            setIsLoading(false);
-            if (err.name === "NotAllowedError") {
-              setRequiresInteraction(true);
-              setError({
-                message: "Autoplay blocked: User interaction required",
-                details: {
-                  code: "NotAllowedError",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            } else {
-              setError({
-                message: `Video playback failed: ${err.message}`,
-                details: {
-                  code: err.code || "N/A",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            }
-          });
+          attemptToPlayVideo();
         } else {
           setIsLoading(false);
         }
       };
+
 
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
@@ -2951,8 +3034,8 @@ const MediaItem = React.memo(
                     videoSrc.toLowerCase().endsWith(".mp4")
                       ? "video/mp4"
                       : isMov
-                      ? "video/quicktime"
-                      : "video/webm"
+                        ? "video/quicktime"
+                        : "video/webm"
                   }
                 />
                 Your browser does not support the video tag.
@@ -3106,6 +3189,31 @@ const Preview = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(defaultSettings);
   const controlTimeoutRef = useRef(null);
+  const [socket, setSocket] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+
+  function Preview() {
+    const mediaItems = useSelector((state) => state.media.mediaItems);
+  
+    return (
+      <div>
+        <h1>Preview Page</h1>
+        {mediaItems.length === 0 ? (
+          <p>No media available</p>
+        ) : (
+          mediaItems.map((item, index) => (
+            <div key={index}>
+              <p>{item.name}</p>
+              <video src={item.url} controls width="300" />
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+
 
   // Function to reset the control visibility timeout
   const resetControlTimeout = useCallback(() => {
@@ -3117,6 +3225,7 @@ const Preview = () => {
       setShowControls(false);
     }, 5000); // Hide controls after 5 seconds
   }, []);
+
 
   // Handle mouse movement to show controls and reset the timeout
   useEffect(() => {
@@ -3340,11 +3449,40 @@ const Preview = () => {
     [isScheduledNow]
   );
 
+
+
+  // const stableCacheBuster = useMemo(() => Date.now(), []);
+
+  // const getContentUrl = useCallback(
+  //   (content, cacheBuster = url === "Automate" ? stableCacheBuster : "static") => {
+  //     if (!content) return "";
+  //     const prefix = "/api/upload/preview/";
+  //     let baseUrl;
+
+  //     if (content.startsWith(prefix)) {
+  //       baseUrl = content.slice(prefix.length);
+  //     } else if (isYouTubeUrl(content)) {
+  //       return getYouTubeEmbedUrl(content);
+  //     } else {
+  //       baseUrl = content.startsWith("http")
+  //         ? content
+  //         : `${apiBaseUrl}/${content}`;
+  //     }
+
+  //     const cacheBusterParam = `t=${cacheBuster}`;
+  //     const separator = baseUrl.includes("?") ? "&" : "?";
+  //     return `${baseUrl}${separator}${cacheBusterParam}`;
+  //   },
+  //   [url, stableCacheBuster]
+  // );
+
+
   const stableCacheBuster = useMemo(() => Date.now(), []);
 
   const getContentUrl = useCallback(
-    (content, cacheBuster = url === "Automate" ? stableCacheBuster : "static") => {
+    (content) => {
       if (!content) return "";
+
       const prefix = "/api/upload/preview/";
       let baseUrl;
 
@@ -3358,12 +3496,15 @@ const Preview = () => {
           : `${apiBaseUrl}/${content}`;
       }
 
-      const cacheBusterParam = `t=${cacheBuster}`;
+      const cacheBusterValue = url === "Automate" ? stableCacheBuster : "static";
+      const cacheBusterParam = `t=${cacheBusterValue}`;
       const separator = baseUrl.includes("?") ? "&" : "?";
+
       return `${baseUrl}${separator}${cacheBusterParam}`;
     },
     [url, stableCacheBuster]
   );
+
 
   const preloadMedia = useCallback(
     (content) => {
@@ -3378,8 +3519,8 @@ const Preview = () => {
           )
             ? "video"
             : item.content.endsWith(".pdf")
-            ? "fetch"
-            : "image";
+              ? "fetch"
+              : "image";
           link.onerror = () => console.error(`Wait Your Content Is Loading ${url}`);
           document.head.appendChild(link);
         }
@@ -3843,7 +3984,7 @@ const Preview = () => {
         setCurrentLayout(firstLayout);
         updateVisibleItems(firstLayout, groupedContent, 0);
         console.log("Completed one loop, fetching new data");
-    
+
         // If URL is "Automate", clear the cache and hard refresh
         if (url === "Automate") {
           const cacheKey = `preview_${url}_${Date.now()}`; // Matches the cache key used in fetchData
@@ -3893,7 +4034,8 @@ const Preview = () => {
           formatTimeRemaining
         )
       ) : mediaContent.length > 0 ? (
-        <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
+        // <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
+        <div className={`grid w-full h-screen gap-2 ${getGridClasses()}`}>
           {visibleItems.map((item, index) => (
             <div
               key={index}

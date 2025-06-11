@@ -42,7 +42,7 @@ module.exports = (sequelize, DataTypes) => {
       defaultValue: {
         ticker: {
           speed: 500,
-          height: 48,
+          height: 50,
           fontSize: 16,
           visible: true,
         },
@@ -51,7 +51,7 @@ module.exports = (sequelize, DataTypes) => {
           visible: true,
         },
         temperature: {
-          position: "bottom-left",
+          position: "top-left",
           visible: true,
         },
       },

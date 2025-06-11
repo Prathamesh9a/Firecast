@@ -20,6 +20,32 @@ import Swal from 'sweetalert2';
 import 'react-toastify/dist/ReactToastify.css';
 import { v4 as uuidv4 } from 'uuid';
 import './home.css';
+import { useDispatch } from 'react-redux';
+import { setMediaItems, addMediaItem } from '../redux/mediaSlice';
+
+function Home() {
+  const dispatch = useDispatch();
+
+  const handleUpload = (newItem) => {
+    dispatch(addMediaItem(newItem));
+  };
+
+  const handleSetAll = (mediaList) => {
+    dispatch(setMediaItems(mediaList));
+  };
+
+  return (
+    <div>
+      <button onClick={() => handleUpload({ name: 'New File', url: 'file.mp4' })}>
+        Add Media
+      </button>
+
+      <button onClick={() => handleSetAll([{ name: 'Video 1', url: 'vid1.mp4' }])}>
+        Set All Media
+      </button>
+    </div>
+  );
+}
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -738,8 +764,8 @@ const Home1 = () => {
         </div>
 
         <div className="container col-span-8 space-y-10" style={{ height: '100%', overflow: 'hidden' }}>
-        <div className="bg-gray-100 p-2 justify-items-center" style={{ height: '100%', overflow: 'hidden' }}>
-        <div className="flex items-center justify-start mb-2">
+          <div className="bg-gray-100 p-2 justify-items-center" style={{ height: '100%', overflow: 'hidden' }}>
+            <div className="flex items-center justify-start mb-2">
               <IoArrowBackCircleOutline
                 className="w-8 h-8 mr-6 cursor-pointer hover:text-gray-500 hover:scale-110 transition duration-200"
                 onClick={handleBack}
@@ -900,7 +926,7 @@ const Home1 = () => {
                     //           type="text"
                     //           className="w-full p-1.5 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
                     //           style={{
-                               
+
                     //             width: '70%',
                     //             backgroundColor: '#F7F7FF',
                     //             paddingLeft: '12px',
@@ -950,7 +976,7 @@ const Home1 = () => {
                     //       <button
                     //         onClick={() => openSchedulerModal(group.id)}
                     //         className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
-                            
+
                     //       >
                     //         {group.schedule?.startTime || group.schedule?.startDate ? (
                     //           <>
@@ -983,95 +1009,95 @@ const Home1 = () => {
                     //   )}
                     // </div>
                     <div
-                    key={itemIndex}
-                    className="flex items-start w-full gap-4"
-                    style={{
-                      borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none',
-                      paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0',
-                    }}
-                  >
-                    {/* Upload Field */}
-                    <div className="flex flex-col w-[440px]">
-                      <label className="text-xs text-gray-600 font-medium mb-1">Upload</label>
-                      <div
-                        className="relative flex items-center border border-gray-300 rounded-md overflow-hidden"
-                        onDragOver={(e) => e.preventDefault()}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const droppedFiles = Array.from(e.dataTransfer.files);
-                          handleFileDrop(group.id, itemIndex, droppedFiles);
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="h-8 px-4 text-white bg-gray-800 rounded-l-lg flex items-center justify-center hover:bg-blue-700"
-                          onClick={() =>
-                            document.getElementById(`file-input-${group.id}-${itemIndex}`).click()
-                          }
-                        >
-                          <FaFileArrowUp className="text-lg" />
-                          <span className="ml-2 font-outfit">Upload</span>
-                        </button>
-                        <input
-                          type="file"
-                          className="hidden"
-                          onChange={(e) => handleInputChange(group.id, itemIndex, e)}
-                          id={`file-input-${group.id}-${itemIndex}`}
-                          accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                        />
-                        <input
-                          type="text"
-                          className="w-full p-1.5 text-sm border-l border-gray-300 bg-[#F7F7FF] font-outfit text-black"
-                          placeholder="Embedded Link / Image / Video or Upload File"
-                          value={item.file ? item.file.name : item.link}
-                          onChange={(e) => {
-                            setGroups(groups.map((g) => {
-                              if (g.id === group.id) {
-                                const newItems = [...g.items];
-                                newItems[itemIndex].link = e.target.value;
-                                newItems[itemIndex].file = null;
-                                return { ...g, items: newItems };
-                              }
-                              return g;
-                            }));
+                      key={itemIndex}
+                      className="flex items-start w-full gap-4"
+                      style={{
+                        borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none',
+                        paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0',
+                      }}
+                    >
+                      {/* Upload Field */}
+                      <div className="flex flex-col w-[440px]">
+                        <label className="text-xs text-gray-600 font-medium mb-1">Upload</label>
+                        <div
+                          className="relative flex items-center border border-gray-300 rounded-md overflow-hidden"
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const droppedFiles = Array.from(e.dataTransfer.files);
+                            handleFileDrop(group.id, itemIndex, droppedFiles);
                           }}
-                        />
+                        >
+                          <button
+                            type="button"
+                            className="h-8 px-4 text-white bg-gray-800 rounded-l-lg flex items-center justify-center hover:bg-blue-700"
+                            onClick={() =>
+                              document.getElementById(`file-input-${group.id}-${itemIndex}`).click()
+                            }
+                          >
+                            <FaFileArrowUp className="text-lg" />
+                            <span className="ml-2 font-outfit">Upload</span>
+                          </button>
+                          <input
+                            type="file"
+                            className="hidden"
+                            onChange={(e) => handleInputChange(group.id, itemIndex, e)}
+                            id={`file-input-${group.id}-${itemIndex}`}
+                            accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          />
+                          <input
+                            type="text"
+                            className="w-full p-1.5 text-sm border-l border-gray-300 bg-[#F7F7FF] font-outfit text-black"
+                            placeholder="Embedded Link / Image / Video or Upload File"
+                            value={item.file ? item.file.name : item.link}
+                            onChange={(e) => {
+                              setGroups(groups.map((g) => {
+                                if (g.id === group.id) {
+                                  const newItems = [...g.items];
+                                  newItems[itemIndex].link = e.target.value;
+                                  newItems[itemIndex].file = null;
+                                  return { ...g, items: newItems };
+                                }
+                                return g;
+                              }));
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Time Field */}
+                      <div className="flex flex-col w-[120px]">
+                        <label className="text-xs text-gray-600 font-medium mb-1">Time (sec)</label>
+                        <div className="relative">
+                          <IoTimeOutline className="absolute top-2 left-2 text-gray-500" />
+                          <input
+                            type="number"
+                            value={group.time}
+                            onChange={(e) => handleTimeChange(group.id, e.target.value)}
+                            className="w-full px-2 py-1 pl-7 pr-8 border border-gray-300 rounded-md text-center"
+                            placeholder="00"
+                          />
+                          <span className="absolute right-1 top-[3px] bg-black text-white text-xs rounded px-1 py-[6px]">
+                            Sec
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Schedule Field */}
+                      <div className="flex flex-col w-[140px]">
+                        <label className="text-xs text-gray-600 font-medium mb-1">Schedule</label>
+                        <button
+                          onClick={() => openSchedulerModal(group.id)}
+                          className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'
+                            }`}
+                        >
+                          {group.schedule?.startTime || group.schedule?.startDate
+                            ? 'Edit Schedule'
+                            : 'Add Schedule'}
+                        </button>
                       </div>
                     </div>
-                  
-                    {/* Time Field */}
-                    <div className="flex flex-col w-[120px]">
-                      <label className="text-xs text-gray-600 font-medium mb-1">Time (sec)</label>
-                      <div className="relative">
-                        <IoTimeOutline className="absolute top-2 left-2 text-gray-500" />
-                        <input
-                          type="number"
-                          value={group.time}
-                          onChange={(e) => handleTimeChange(group.id, e.target.value)}
-                          className="w-full px-2 py-1 pl-7 pr-8 border border-gray-300 rounded-md text-center"
-                          placeholder="00"
-                        />
-                        <span className="absolute right-1 top-[3px] bg-black text-white text-xs rounded px-1 py-[6px]">
-                          Sec
-                        </span>
-                      </div>
-                    </div>
-                  
-                    {/* Schedule Field */}
-                    <div className="flex flex-col w-[140px]">
-                      <label className="text-xs text-gray-600 font-medium mb-1">Schedule</label>
-                      <button
-                        onClick={() => openSchedulerModal(group.id)}
-                        className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'
-                        }`}
-                      >
-                        {group.schedule?.startTime || group.schedule?.startDate
-                          ? 'Edit Schedule'
-                          : 'Add Schedule'}
-                      </button>
-                    </div>
-                  </div>
-                  
+
                   ))}
                 </div>
               ))}
@@ -1100,7 +1126,7 @@ const Home1 = () => {
                       {groups.map((group, groupIndex) => (
                         <div key={group.id} className="border p-3 rounded-md">
                           <p className="text-sm font-medium mb-2">{getLayoutName(group.layout)}</p>
-                          <div className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} gap-2`}>
+                          {/* <div className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} gap-2`}>
                             {group.items.map((item, itemIndex) => {
                               console.log('Preview item:', item); // CHANGE: Added debug log for preview items
                               return (
@@ -1134,7 +1160,43 @@ const Home1 = () => {
                                 </div>
                               );
                             })}
+                          </div> */}
+
+                          <div
+                            className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} grid-rows-${layoutOptions.find(l => l.id === group.layout).rows} gap-2`}
+                          >
+                            {group.items.map((item, itemIndex) => (
+                              <div key={itemIndex} className="border p-2 rounded-md">
+                                {item.file ? (
+                                    item.file.type.startsWith("image/") ? (
+                                      <img
+                                        src={URL.createObjectURL(item.file)}
+                                        alt="Preview"
+                                        className="w-full h-auto rounded-md"
+                                      />
+                                    ) : item.file.type.startsWith("video/") ? (
+                                      <video
+                                        src={URL.createObjectURL(item.file)}
+                                        controls
+                                        className="w-full h-auto rounded-md"
+                                      />
+                                    ) : (
+                                      <p className="text-sm text-gray-700">Preview Not Availble</p>
+                                    )
+                                  ) : (
+                                    <a
+                                      href={item.link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 underline text-sm"
+                                    >
+                                      {item.link}
+                                    </a>
+                                  )}
+                              </div>
+                            ))}
                           </div>
+
                         </div>
                       ))}
                     </div>
