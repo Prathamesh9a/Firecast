@@ -5,8 +5,8 @@
   "bin": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
-    "dev": "nodemon server.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js"
   },
   "keywords": [],
   "author": "",
@@ -14,9 +14,11 @@
   "description": "",
   "dependencies": {
     "axios": "^1.9.0",
+    "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
+    "express-session": "^1.18.1",
     "framer-motion": "^12.16.0",
     "helmet": "^8.1.0",
     "install": "^0.13.0",
@@ -24,6 +26,7 @@
     "jszip": "^3.10.1",
     "jwt-decode": "^4.0.0",
     "libreoffice-convert": "^1.6.1",
+    "multer": "^2.0.1",
     "node-fetch": "^3.3.2",
     "nodemon": "^3.1.7",
     "npm": "^11.4.1",

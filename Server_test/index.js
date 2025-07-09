@@ -273,7 +273,7 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Start HTTP server (or HTTPS if needed)
-const PORT = 4069;
+const PORT = 4081;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`API Gateway running on http://${ipAddress}:${PORT}`);
 });
