@@ -3613,7 +3613,7 @@ const Preview = () => {
     }
   }, [url, getActiveContent, groupMediaByLayout, preloadMedia]);
 
-  const fetchWeather = useCallback(async (location = "Mumbai") => {
+  const fetchWeather = useCallback(async (location = "Ohio") => {
     if (!weatherApiKey) {
       console.error("Weather API key is missing.");
       return;
@@ -3734,12 +3734,12 @@ const Preview = () => {
         },
         (error) => {
           console.error("Error getting location:", error);
-          fetchWeather("Mumbai");
+          fetchWeather("Ohio");
         }
       );
     } else {
       console.error("Geolocation is not supported by this browser.");
-      fetchWeather("Mumbai");
+      fetchWeather("Ohio");
     }
   }, [fetchWeather]);
 
