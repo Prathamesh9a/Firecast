@@ -5,6 +5,7 @@ import Login from './Pages/Login';
 import Home from './Pages/Home';
 import AdminPage from './Pages/AdminPage';
 import Preview from './Pages/Preview';
+// import Preview2 from './Pages/Preview2';
 import Logout from './Pages/Logout';
 import Home1 from './Pages/Home1';
 import EditUrl from './Pages/EditUrl';
@@ -21,10 +22,11 @@ function App() {
           <Route path="/home" element={<Home1 />} />
           <Route path="/editUrl" element={<ExistingURL />} />
           <Route path="/admin" element={<AdminPage />} />
-          {/* <Route path="/register" element={<Register />} /> */}
+          <Route path="/register" element={<Register />} />
           <Route path="/login" element={<Login />} />
           <Route path="/logout" element={<Logout />} />
           <Route path="/:url" element={<Preview />} />
+          {/* <Route path="/:url" element={<Preview2 />} /> */}
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </div>

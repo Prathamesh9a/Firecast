@@ -1,0 +1,16 @@
+/* CSS for fixed header */
+.header-fixed {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000; /* Ensure the header is above other content */
+    background-color: white; /* Ensure the header has a background color */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Optional: Add a shadow for better visibility */
+  }
+  
+  /* Add padding to the main content to account for the fixed header */
+  .main-content {
+    padding-top: 64px; /* Adjust this value based on the height of your header */
+  }
+  

@@ -5,9 +5,10 @@
   position: relative;
 }
 
+/* animation: marquee 500s linear infinite; Much slower speed */
 .news-ticker {
   display: inline-block;
-  /* animation: marquee 500s linear infinite; Much slower speed */
+  
 }
 
 .news-ticker:hover {
