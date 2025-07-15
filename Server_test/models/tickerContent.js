@@ -56,6 +56,10 @@ module.exports = (sequelize, DataTypes) => {
         },
       },
     },
+    account_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false
+    },
   });
 
   // Associate the TickerData model with the User model

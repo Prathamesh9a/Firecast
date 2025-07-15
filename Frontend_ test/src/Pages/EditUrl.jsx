@@ -2533,10 +2533,31 @@ const EditUrl = () => {
 
   const fetchExistingUrls = async () => {
     let userId;
+    // It's good practice to check if a token exists before attempting to decode it.
     if (token) {
-      const decodedToken = jwtDecode(token);
-      userId = decodedToken.userId;
+      try {
+        const decodedToken = jwtDecode(token);
+        userId = decodedToken.userId;
+      } catch (error) {
+        // Handle cases where the token might be invalid or malformed
+        console.error("Error decoding token:", error);
+        Swal.fire({
+          title: "Authentication Error",
+          text: "Your session may have expired or is invalid. Please log in again.", // Slightly refined text
+          icon: "warning",
+          confirmButtonText: "OK",
+        });
+        // Optionally, trigger a logout or redirect to login here
+        return; // Stop execution if the token is invalid
+      }
+    } else {
+      console.warn("No authentication token found. User may not be logged in.");
+      // No need to show a Swal here, as the user might just not be logged in yet.
+      // If this function is only called when a user *should* be logged in, consider
+      // redirecting to login or showing a subtle prompt.
+      return;
     }
+  
     try {
       const res = await axios.post(
         `${apiBaseUrl}/api/upload/existingUrl/`,
@@ -2544,18 +2565,61 @@ const EditUrl = () => {
         {
           headers: {
             "Content-Type": "application/json",
-            Authorization: token,
+            Authorization: `Bearer ${token}`, // Ensure this matches backend expectation
           },
         }
       );
+  
       setUrls(res.data);
       setUrlCount(res.data.length);
+  
+      // No need to show "No URLs Found" Swal here if the backend sends 409 for it.
+      // The 409 response will be caught by the catch block below.
+  
     } catch (error) {
-      const message = error.response?.data?.message || "Failed to fetch URLs.";
+      console.error("Failed to fetch URLs:", error); // Log the full error for debugging
+  
+      let userMessage = "We couldn't load your URLs right now. Please try again later.";
+      let iconType = "error"; // Default icon
+  
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        if (error.response.status === 401 || error.response.status === 403) {
+          userMessage = "It looks like your session has expired or you don't have permission. Please log in again.";
+          // You would typically trigger a logout or redirect to the login page here
+          // For example: `window.location.href = '/login';`
+        } else if (error.response.status === 409) {
+          // Handle the 409 specifically if you choose to send it from the backend
+          // for "no URLs found". This ensures a friendly message from the server
+          // is displayed correctly.
+          if (error.response.data && error.response.data.message) {
+            userMessage = error.response.data.message;
+          } else {
+            userMessage = "It looks like you haven't created any URLs yet. Let's get started by creating your first one!";
+          }
+          iconType = "info"; // Change icon for a non-critical "no data" state
+          Swal.fire({
+            title: "No URLs Found", // More specific title
+            text: userMessage,
+            icon: iconType,
+            confirmButtonText: "Got it!",
+          });
+          return; // Important: Return here to prevent the generic "Oops!" error for 409
+        }
+        else if (error.response.data && error.response.data.message) {
+          userMessage = error.response.data.message;
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        userMessage = "It seems we're having trouble connecting to the server. Please check your internet connection.";
+      }
+  
+      // Default error display for other unhandled errors or network issues
       Swal.fire({
-        title: "Error!",
-        text: message,
-        icon: "error",
+        title: "Oops!",
+        text: userMessage,
+        icon: iconType,
         confirmButtonText: "OK",
       });
     }

@@ -3,25 +3,21 @@
 const { Model, DataTypes } = require('sequelize');
 
 module.exports = (sequelize, DataTypes) => {
-  const User = sequelize.define('User', {
-    username: {
+  const Account = sequelize.define('Account', {
+    accountName: {
       type: DataTypes.STRING,
       allowNull: false,
       unique: true,
     },
-    password: {
-      type: DataTypes.STRING,
-      allowNull: false,
-    },
-    accountId: {
+    createdBy: {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: 'Accounts',
+        model: 'Users',
         key: 'id',
       },
     },
   });
 
-  return User;
+  return Account;
 };

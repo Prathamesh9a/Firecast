@@ -206,6 +206,7 @@ const wss = new WebSocket.Server({ server }); // Initialize WebSocket server
 // CORS configuration
 const allowedOrigins = [
     `http://122.179.140.84:4012`,
+    `https://122.179.140.84:4012`,
     `http://122.179.140.84:86`,
     `http://192.168.1.27:86`,
     `http://${ipAddress}:3000`,
@@ -272,6 +273,7 @@ process.on('unhandledRejection', (reason) => {
     process.exit(1);
 });
 
+// D:\Firecast USA\Firecast\Server_test\upload-service\uploads\stifflera@welspunusa.com\test121\SampleJPGImage_1mbmb.jpg
 // Start HTTP server (or HTTPS if needed)
 const PORT = 4081;
 server.listen(PORT, '0.0.0.0', () => {

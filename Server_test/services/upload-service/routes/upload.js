@@ -18,7 +18,7 @@ const PDFDocument = require("pdfkit");
 const secret_key = "TickerApplication";
 const encryptedLimit = "e7ZLZFFrXSiP/1U2FOvj4w==";
 const secretUrlKey = "9ATicker";
-const baseURL = `http://122.179.140.84:86`;
+const baseURL = `https://122.179.140.84:4012`;
 //const baseURL = `http://192.168.1.27:3000`;
 
 let userId;
@@ -34,7 +34,6 @@ function generateRandomCode(length) {
   return code;
 }
 
-// Function to convert PPT/PPTX to PDF
 async function convertPptToPdf(inputPath, outputPath) {
   try {
     const fileContent = fs.readFileSync(inputPath);
@@ -49,17 +48,28 @@ async function convertPptToPdf(inputPath, outputPath) {
   }
 }
 
-// Function to convert DOC/DOCX to PDF
 async function convertDocToPdf(inputPath, outputPath) {
   try {
+    // Verify input file exists
+    if (!fs.existsSync(inputPath)) {
+      throw new Error(`Input file does not exist: ${inputPath}`);
+    }
+
+    // Ensure output directory exists
+    const outputDir = path.dirname(outputPath);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
     const fileContent = fs.readFileSync(inputPath);
-    const pdfBuffer = await libreConvert(fileContent, ".pdf", undefined);
+    console.log(`Converting DOC: ${inputPath} to ${outputPath}`);
+    const pdfBuffer = await libreConvert(fileContent, 'pdf', 'writer_pdf_Export');
     fs.writeFileSync(outputPath, pdfBuffer);
-    logger.log("info", `Successfully converted ${inputPath} to PDF`);
+    logger.log('info', `Successfully converted ${inputPath} to PDF at ${outputPath}`);
     return true;
   } catch (error) {
-    console.error("Error converting DOC/DOCX to PDF:", error);
-    logger.log("error", `Conversion error: ${error.message}`);
+    console.error('Error converting DOC/DOCX to PDF:', error);
+    logger.log('error', `Conversion error: ${error.message}`);
     return false;
   }
 }
@@ -170,6 +180,7 @@ const upload = multer({
   },
 }).any();
 
+// Upload Route
 router.post("/upload", licenseMiddleware, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -201,18 +212,25 @@ router.post("/upload", licenseMiddleware, (req, res) => {
     const Url_Name = req.body.Url_Name;
     const custom_ticker = req.body.custom_ticker;
     const links = Array.isArray(req.body.links) ? req.body.links : [];
-    // const settings = req.body.settings || defaultSettings; // Use defaultSettings if not provided
 
-    const token = req.headers.authorization;
+    const token = req.headers.authorization
     if (!token) {
       logger.log("error", `Error occurred: Missing Token`);
-      return res
-        .status(401)
-        .json({ message: "Unauthorized: Token is missing" });
+      return res.status(401).json({ message: "Unauthorized: Token is missing" });
     }
 
     try {
-      jwt.verify(token, secret_key);
+      const decoded = jwt.verify(token, secret_key);
+      const accountId = 1;
+
+      const user = await db.User.findOne({
+        where: { id: decoded.userId },
+        include: [{ model: db.Account, attributes: ['accountName'] }],
+      });
+      if (!user || !user.Account) {
+        return res.status(400).json({ message: "User or account not found" });
+      }
+      const accountName = user.Account.accountName;
 
       if (links.length === 0) {
         return res.status(400).json({
@@ -221,14 +239,13 @@ router.post("/upload", licenseMiddleware, (req, res) => {
       }
 
       const MAX_URL_LIMIT = 6;
-      const userUrlCount = await db.TickerData.count({
-        where: { user_id: userId },
+      const accountUrlCount = await db.TickerData.count({
+        where: { account_id: accountId },
       });
 
-      if (userUrlCount >= MAX_URL_LIMIT) {
+      if (accountUrlCount >= MAX_URL_LIMIT) {
         return res.status(403).json({
-          message:
-            "You have reached the maximum allowed URLs. Please contact Admin or delete an existing URL to create a new one.",
+          message: "Account has reached the maximum allowed URLs. Please contact Admin or delete an existing URL to create a new one.",
         });
       }
 
@@ -237,17 +254,17 @@ router.post("/upload", licenseMiddleware, (req, res) => {
       }
 
       const existingUrl = await db.TickerData.findOne({
-        where: { Url_Name: Url_Name },
+        where: { Url_Name, account_id: accountId },
       });
 
       if (existingUrl) {
         return res.status(400).json({
-          message: `The Url_Name "${Url_Name}" is already taken. Please choose a different name.`,
+          message: `The Url_Name "${Url_Name}" is already taken for this account. Please choose a different name.`,
         });
       }
 
       const mediaData = [];
-      const userUploadDir = `./upload-service/uploads/${username}`;
+      const accountUploadDir = `./upload-service/uploads/${username}`;
       const flaskApiUrl = "http://127.0.0.1:5052/api/summarize";
 
       // Process files for PPT/PPTX, DOC/DOCX, and TXT conversions
@@ -260,28 +277,23 @@ router.post("/upload", licenseMiddleware, (req, res) => {
         if (
           file &&
           (file.mimetype === "application/vnd.ms-powerpoint" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+            file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
             file.mimetype === "application/msword" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
             file.mimetype === "text/plain")
         ) {
           const originalPath = file.path;
-          const pdfPath =
-            originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
+          const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
 
           let conversionPromise;
           if (
             file.mimetype === "application/vnd.ms-powerpoint" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
           ) {
             conversionPromise = convertPptToPdf(originalPath, pdfPath);
           } else if (
             file.mimetype === "application/msword" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           ) {
             conversionPromise = convertDocToPdf(originalPath, pdfPath);
           } else if (file.mimetype === "text/plain") {
@@ -321,10 +333,7 @@ router.post("/upload", licenseMiddleware, (req, res) => {
             fs.unlinkSync(originalFile.path);
             logger.log("info", `Deleted original file: ${originalFile.path}`);
           } catch (unlinkError) {
-            logger.log(
-              "error",
-              `Failed to delete original file ${originalFile.path}: ${unlinkError.message}`
-            );
+            logger.log("error", `Failed to delete original file ${originalFile.path}: ${unlinkError.message}`);
           }
 
           console.log(`Converted ${originalFile.filename} to ${pdfFilename}`);
@@ -351,9 +360,7 @@ router.post("/upload", licenseMiddleware, (req, res) => {
 
         const parsedTime = parseInt(time, 10);
         if (!parsedTime || isNaN(parsedTime) || parsedTime <= 0) {
-          return res
-            .status(400)
-            .json({ message: `Please enter a valid time for item ${i + 1}` });
+          return res.status(400).json({ message: `Please enter a valid time for item ${i + 1}` });
         }
 
         if (
@@ -369,11 +376,9 @@ router.post("/upload", licenseMiddleware, (req, res) => {
           (f) =>
             f.fieldname === `links[${i}][file]` &&
             (f.mimetype === "application/vnd.ms-powerpoint" ||
-              f.mimetype ===
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+              f.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
               f.mimetype === "application/msword" ||
-              f.mimetype ===
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+              f.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
               f.mimetype === "text/plain")
         );
 
@@ -391,16 +396,9 @@ router.post("/upload", licenseMiddleware, (req, res) => {
 
         if (link && link.startsWith("blob:") && file) {
           contentPath = `/${username}/${Url_Name}/${file.filename}`;
-
-          const cacheBuster = Date.now(); // Or use uuid or random number
-          contentPath = `/${username}/${Url_Name}/${file.filename}`;
-
-          // const cacheBuster = Date.now();
-          // const contentPath = `/${username}/${Url_Name}/${file.filename}?v=${cacheBuster}`;
-
           if (file.mimetype === "application/pdf" && analyzeWithAI === "true") {
             try {
-              const pdfPath = path.join(userUploadDir, Url_Name, file.filename);
+              const pdfPath = path.join(accountUploadDir, Url_Name, file.filename);
               if (fs.existsSync(pdfPath)) {
                 const pdfBuffer = fs.readFileSync(pdfPath);
                 const base64Pdf = pdfBuffer.toString("base64");
@@ -437,25 +435,17 @@ router.post("/upload", licenseMiddleware, (req, res) => {
 
         const validatedSchedule = { ...schedule };
         if (validatedSchedule.startDate) {
-          validatedSchedule.startDate = new Date(
-            validatedSchedule.startDate
-          ).toISOString();
+          validatedSchedule.startDate = new Date(validatedSchedule.startDate).toISOString();
         }
         if (validatedSchedule.endDate) {
-          validatedSchedule.endDate = new Date(
-            validatedSchedule.endDate
-          ).toISOString();
+          validatedSchedule.endDate = new Date(validatedSchedule.endDate).toISOString();
         }
         if (validatedSchedule.repeatUntil) {
-          validatedSchedule.repeatUntil = new Date(
-            validatedSchedule.repeatUntil
-          ).toISOString();
+          validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
         }
         if (typeof validatedSchedule.weeklyDays === "string") {
           try {
-            validatedSchedule.weeklyDays = JSON.parse(
-              validatedSchedule.weeklyDays
-            );
+            validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays);
           } catch (e) {
             validatedSchedule.weeklyDays = [];
           }
@@ -481,25 +471,29 @@ router.post("/upload", licenseMiddleware, (req, res) => {
 
       const uniqueUrl = `${Url_Name}`;
 
+      console.log(accountId , " accountId ");
+      
       const newTickerData = await db.TickerData.create({
-        user_id: userId,
+        user_id: userId, // Keep user_id to track creator
+        account_id: accountId,
         url_content: mediaData,
         url: uniqueUrl,
         Url_Name: Url_Name,
         custom_ticker: custom_ticker,
-        // settings: settings, // Save settings
       });
 
+      console.log(newTickerData , " -- newTickerData");
+      
       logger.logUserActivity(method, apiName, {
         user_id: userId,
+        account_id: accountId,
         previewUrl: `${baseURL}/${uniqueUrl}`,
-        message: `URLs and files created successfully by User ${userId}`,
+        message: `URLs and files created successfully by User ${userId} for Account ${accountName}`,
       });
 
       res.json({
         message: "URLs and files created successfully",
         previewUrl: `${baseURL}/${uniqueUrl}`,
-        // settings: newTickerData.settings, // Return the saved settings
       });
     } catch (error) {
       console.error("Error saving data:", error);
@@ -509,14 +503,14 @@ router.post("/upload", licenseMiddleware, (req, res) => {
   });
 });
 
+// Update URL Content Route
 router.patch("/updateUrlContent", async (req, res) => {
   upload(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
         console.error("File size error:", err.message);
         return res.status(400).json({
-          message:
-            "File size exceeds the limit of 500MB. Please upload a smaller file.",
+          message: "File size exceeds the limit of 500MB. Please upload a smaller file.",
         });
       }
     } else if (err) {
@@ -533,21 +527,24 @@ router.patch("/updateUrlContent", async (req, res) => {
     }
 
     try {
-      const token = req.headers.authorization;
+      const token = req.headers.authorization
       if (!token) {
-        return res
-          .status(401)
-          .json({ message: "Unauthorized: Token is missing" });
+        return res.status(401).json({ message: "Unauthorized: Token is missing" });
       }
 
-      const decodedToken = jwt.verify(token, secret_key);
-      const userId = decodedToken.userId;
-
-      if (!userId) {
-        return res.status(401).json({ message: "Unauthorized token" });
+      const decoded = jwt.verify(token, secret_key);
+      const userId = decoded.userId;
+      const accountId = decoded.accountId;
+      const user = await db.User.findOne({
+        where: { id: userId },
+        include: [{ model: db.Account, attributes: ['accountName'] }],
+      });
+      if (!user || !user.Account) {
+        return res.status(400).json({ message: "User or account not found" });
       }
+      const accountName = user.Account.accountName;
 
-      const { id, Url_Name, custom_ticker } = req.body; // Add settings to destructuring
+      const { id, Url_Name, custom_ticker } = req.body;
       const links = req.body.links || [];
       const method = req.method;
       const apiName = req.originalUrl;
@@ -559,13 +556,14 @@ router.patch("/updateUrlContent", async (req, res) => {
       const existingUrl = await db.TickerData.findOne({
         where: {
           Url_Name: Url_Name,
+          account_id: accountId,
           ...(id ? { id: { [db.Sequelize.Op.ne]: id } } : {}),
         },
       });
 
       if (existingUrl) {
         return res.status(400).json({
-          message: `The Url_Name "${Url_Name}" is already taken. Please choose a different name.`,
+          message: `The Url_Name "${Url_Name}" is already taken for this account. Please choose a different name.`,
         });
       }
 
@@ -574,14 +572,13 @@ router.patch("/updateUrlContent", async (req, res) => {
 
       if (!id || !Array.isArray(links)) {
         return res.status(400).json({
-          message:
-            "Invalid request. Please provide a valid ID and links array.",
+          message: "Invalid request. Please provide a valid ID and links array.",
         });
       }
 
-      const tickerData = await db.TickerData.findOne({ where: { id } });
+      const tickerData = await db.TickerData.findOne({ where: { id, account_id: accountId } });
       if (!tickerData) {
-        return res.status(404).json({ message: "Record not found" });
+        return res.status(404).json({ message: "Record not found for this account" });
       }
 
       // Process files for PPT/PPTX, DOC/DOCX, and TXT conversions
@@ -594,28 +591,23 @@ router.patch("/updateUrlContent", async (req, res) => {
         if (
           file &&
           (file.mimetype === "application/vnd.ms-powerpoint" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+            file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
             file.mimetype === "application/msword" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+            file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
             file.mimetype === "text/plain")
         ) {
           const originalPath = file.path;
-          const pdfPath =
-            originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
+          const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
 
           let conversionPromise;
           if (
             file.mimetype === "application/vnd.ms-powerpoint" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
           ) {
             conversionPromise = convertPptToPdf(originalPath, pdfPath);
           } else if (
             file.mimetype === "application/msword" ||
-            file.mimetype ===
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           ) {
             conversionPromise = convertDocToPdf(originalPath, pdfPath);
           } else if (file.mimetype === "text/plain") {
@@ -655,10 +647,7 @@ router.patch("/updateUrlContent", async (req, res) => {
             fs.unlinkSync(originalFile.path);
             logger.log("info", `Deleted original file: ${originalFile.path}`);
           } catch (unlinkError) {
-            logger.log(
-              "error",
-              `Failed to delete original file ${originalFile.path}: ${unlinkError.message}`
-            );
+            logger.log("error", `Failed to delete original file ${originalFile.path}: ${unlinkError.message}`);
           }
 
           console.log(`Converted ${originalFile.filename} to ${pdfFilename}`);
@@ -700,9 +689,7 @@ router.patch("/updateUrlContent", async (req, res) => {
 
           const parsedTime = parseInt(time, 10);
           if (!parsedTime || isNaN(parsedTime) || parsedTime <= 0) {
-            return res
-              .status(400)
-              .json({ message: `Please enter a valid time for item ${i + 1}` });
+            return res.status(400).json({ message: `Please enter a valid time for item ${i + 1}` });
           }
 
           if (!link || link.trim() === "") {
@@ -713,9 +700,7 @@ router.patch("/updateUrlContent", async (req, res) => {
 
           if (layout && !validLayouts.includes(layout)) {
             return res.status(400).json({
-              message: `Invalid layout value for item ${
-                i + 1
-              }. Allowed values are: ${validLayouts.join(", ")}`,
+              message: `Invalid layout value for item ${i + 1}. Allowed values are: ${validLayouts.join(", ")}`,
             });
           }
 
@@ -723,11 +708,9 @@ router.patch("/updateUrlContent", async (req, res) => {
             (f) =>
               f.fieldname === `links[${i}][file]` &&
               (f.mimetype === "application/vnd.ms-powerpoint" ||
-                f.mimetype ===
-                  "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+                f.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
                 f.mimetype === "application/msword" ||
-                f.mimetype ===
-                  "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+                f.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
                 f.mimetype === "text/plain")
           );
 
@@ -741,18 +724,11 @@ router.patch("/updateUrlContent", async (req, res) => {
             : null;
 
           const file =
-            pdfFile ||
-            req.files.find((f) => f.fieldname === `links[${i}][file]`);
+            pdfFile || req.files.find((f) => f.fieldname === `links[${i}][file]`);
 
           if (link && link.startsWith("blob:") && file) {
-            // contentPath = `/${username}/${Url_Name}/${file.filename}`;
-            const cacheBuster = Date.now(); // Or use uuid or random number
             contentPath = `/${username}/${Url_Name}/${file.filename}`;
-
-            if (
-              file.mimetype === "application/pdf" &&
-              analyzeWithAI === "true"
-            ) {
+            if (file.mimetype === "application/pdf" && analyzeWithAI === "true") {
               try {
                 const pdfPath = path.join(
                   __dirname,
@@ -793,25 +769,17 @@ router.patch("/updateUrlContent", async (req, res) => {
 
           const validatedSchedule = { ...schedule };
           if (validatedSchedule.startDate) {
-            validatedSchedule.startDate = new Date(
-              validatedSchedule.startDate
-            ).toISOString();
+            validatedSchedule.startDate = new Date(validatedSchedule.startDate).toISOString();
           }
           if (validatedSchedule.endDate) {
-            validatedSchedule.endDate = new Date(
-              validatedSchedule.endDate
-            ).toISOString();
+            validatedSchedule.endDate = new Date(validatedSchedule.endDate).toISOString();
           }
           if (validatedSchedule.repeatUntil) {
-            validatedSchedule.repeatUntil = new Date(
-              validatedSchedule.repeatUntil
-            ).toISOString();
+            validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
           }
           if (typeof validatedSchedule.weeklyDays === "string") {
             try {
-              validatedSchedule.weeklyDays = JSON.parse(
-                validatedSchedule.weeklyDays
-              );
+              validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays);
             } catch (e) {
               validatedSchedule.weeklyDays = [];
             }
@@ -839,9 +807,7 @@ router.patch("/updateUrlContent", async (req, res) => {
           const { link, time, layout, schedule = {} } = links[i];
           const parsedTime = parseInt(time, 10);
           if (!parsedTime || isNaN(parsedTime) || parsedTime <= 0) {
-            return res
-              .status(400)
-              .json({ message: `Please enter a valid time for item ${i + 1}` });
+            return res.status(400).json({ message: `Please enter a valid time for item ${i + 1}` });
           }
 
           if (!link || link.trim() === "") {
@@ -852,33 +818,23 @@ router.patch("/updateUrlContent", async (req, res) => {
 
           if (layout && !validLayouts.includes(layout)) {
             return res.status(400).json({
-              message: `Invalid layout value for item ${
-                i + 1
-              }. Allowed values are: ${validLayouts.join(", ")}`,
+              message: `Invalid layout value for item ${i + 1}. Allowed values are: ${validLayouts.join(", ")}`,
             });
           }
 
           const validatedSchedule = { ...schedule };
           if (validatedSchedule.startDate) {
-            validatedSchedule.startDate = new Date(
-              validatedSchedule.startDate
-            ).toISOString();
+            validatedSchedule.startDate = new Date(validatedSchedule.startDate).toISOString();
           }
           if (validatedSchedule.endDate) {
-            validatedSchedule.endDate = new Date(
-              validatedSchedule.endDate
-            ).toISOString();
+            validatedSchedule.endDate = new Date(validatedSchedule.endDate).toISOString();
           }
           if (validatedSchedule.repeatUntil) {
-            validatedSchedule.repeatUntil = new Date(
-              validatedSchedule.repeatUntil
-            ).toISOString();
+            validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
           }
           if (typeof validatedSchedule.weeklyDays === "string") {
             try {
-              validatedSchedule.weeklyDays = JSON.parse(
-                validatedSchedule.weeklyDays
-              );
+              validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays);
             } catch (e) {
               validatedSchedule.weeklyDays = [];
             }
@@ -901,15 +857,15 @@ router.patch("/updateUrlContent", async (req, res) => {
         Url_Name: req.body.Url_Name,
         url: req.body.Url_Name,
         custom_ticker: custom_ticker || "",
-        // settings: settings || tickerData.settings, // Update settings if provided, otherwise keep existing
       });
 
       const previewUrl = `${baseURL}/${tickerData.url}`;
 
       logger.logUserActivity(method, apiName, {
         user_id: userId,
+        account_id: accountId,
         previewUrl: previewUrl,
-        message: `URLs Updated successfully By User ${userId}`,
+        message: `URLs Updated successfully By User ${userId} for Account ${accountName}`,
         Updated_id: `${tickerData.id}`,
       });
 
@@ -918,9 +874,9 @@ router.patch("/updateUrlContent", async (req, res) => {
         data: {
           id: tickerData.id,
           user_id: tickerData.user_id,
+          account_id: tickerData.account_id,
           url_content: tickerData.url_content,
           custom_ticker: tickerData.custom_ticker,
-          // settings: tickerData.settings, // Include settings in response
           previewUrl,
         },
       });
@@ -935,6 +891,7 @@ router.patch("/updateUrlContent", async (req, res) => {
   });
 });
 
+// Get Existing URLs Route
 router.post("/existingUrl", async (req, res) => {
   const { userId } = req.body;
 
@@ -944,16 +901,18 @@ router.post("/existingUrl", async (req, res) => {
   }
 
   try {
-    jwt.verify(token, secret_key);
+    // Assuming token format is "Bearer <token>"
+    const actualToken = token.startsWith("Bearer ") ? token.slice(7) : token;
+    const decoded = jwt.verify(actualToken, secret_key);
+    const accountId = decoded.accountId;
 
     const tickerData = await db.TickerData.findAll({
-      where: { user_id: userId },
+      where: { account_id: accountId },
     });
 
     if (!tickerData || tickerData.length === 0) {
-      return res
-        .status(409)
-        .json({ message: "No URLs found. Start by creating a new one!" });
+      // This is excellent! Sending a 409 with a user-friendly message.
+      return res.status(409).json({ message: "It looks like you haven't created any URLs yet. Let's get started by creating your first one!" });
     }
 
     const dataWithPreviewUrls = tickerData.map((item) => ({
@@ -963,74 +922,56 @@ router.post("/existingUrl", async (req, res) => {
 
     res.json(dataWithPreviewUrls);
   } catch (error) {
-    console.error(
-      "Error fetching existing URLs or verifying token:",
-      error.message
-    );
+    console.error("Error fetching existing URLs or verifying token:", error.message);
     logger.log("error", `Error occurred: ${error.message}`);
-    res
-      .status(401)
-      .json({ message: "Unauthorized: Invalid token", error: error.message });
+    // If jwt.verify fails, it's typically an invalid or expired token.
+    // The "Unauthorized: Invalid token" message directly maps to the "session expired" message on the frontend.
+    res.status(401).json({ message: "Unauthorized: Invalid or expired token. Please log in again.", error: error.message });
   }
 });
 
+// Delete URL Route
 router.delete("/deleteUrl", async (req, res) => {
-  const token = req.headers.authorization;
+  const token = req.headers.authorization
   if (!token) {
     return res.status(401).json({ message: "Unauthorized: Token is missing" });
   }
 
   try {
-    const decodedToken = jwt.verify(token, secret_key);
-    const userId = decodedToken.userId;
-    if (!userId) {
-      return res.status(401).json({ message: "Unauthorized token" });
+    const decoded = jwt.verify(token, secret_key);
+    const userId = decoded.userId;
+    const accountId = decoded.accountId;
+    const user = await db.User.findOne({
+      where: { id: userId },
+      include: [{ model: db.Account, attributes: ['accountName'] }],
+    });
+    if (!user || !user.Account) {
+      return res.status(400).json({ message: "User or account not found" });
     }
+    const accountName = user.Account.accountName;
 
     const { id } = req.body;
     const method = req.method;
     const apiName = req.originalUrl;
 
     if (!id) {
-      return res
-        .status(400)
-        .json({ message: "Invalid request. Please provide a valid ID." });
+      return res.status(400).json({ message: "Invalid request. Please provide a valid ID." });
     }
 
-    const tickerData = await db.TickerData.findOne({ where: { id } });
+    const tickerData = await db.TickerData.findOne({ where: { id, account_id: accountId } });
     if (!tickerData) {
-      return res.status(404).json({ message: "Record not found" });
+      return res.status(404).json({ message: "Record not found for this account" });
     }
 
-    const user = await db.User.findOne({
-      where: { id: userId },
-      attributes: ["username"],
-    });
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const username = user.username;
     const urlName = tickerData.Url_Name;
 
     if (tickerData.url_content && Array.isArray(tickerData.url_content)) {
-      logger.log(
-        "info",
-        `Deleting ${tickerData.url_content.length} files for URL ID: ${id}`
-      );
+      logger.log("info", `Deleting ${tickerData.url_content.length} files for URL ID: ${id}`);
       for (const item of tickerData.url_content) {
-        if (
-          item.content &&
-          typeof item.content === "string" &&
-          item.content.startsWith("/")
-        ) {
+        if (item.content && typeof item.content === "string" && item.content.startsWith("/")) {
           try {
             const relativePath = item.content.substring(1);
-            const filePath = path.join(
-              process.cwd(),
-              "upload-service/uploads",
-              relativePath
-            );
+            const filePath = path.join(process.cwd(), "upload-service/uploads", relativePath);
             logger.log("info", `Attempting to delete file: ${filePath}`);
             if (fs.existsSync(filePath)) {
               fs.unlinkSync(filePath);
@@ -1046,12 +987,7 @@ router.delete("/deleteUrl", async (req, res) => {
     }
 
     try {
-      const folderPath = path.join(
-        process.cwd(),
-        "upload-service/uploads",
-        username,
-        urlName
-      );
+      const folderPath = path.join(process.cwd(), "upload-service/uploads", username, urlName);
       logger.log("info", `Checking if folder exists: ${folderPath}`);
       if (fs.existsSync(folderPath)) {
         const files = fs.readdirSync(folderPath);
@@ -1083,8 +1019,9 @@ router.delete("/deleteUrl", async (req, res) => {
 
     logger.logUserActivity(method, apiName, {
       user_id: userId,
+      account_id: accountId,
       urlName: tickerData.Url_Name,
-      message: `URL and all associated files deleted successfully by User ${userId}`,
+      message: `URL and all associated files deleted successfully by User ${userId} for Account ${accountName}`,
       deleted_Id: id,
     });
 
@@ -1099,6 +1036,7 @@ router.delete("/deleteUrl", async (req, res) => {
   }
 });
 
+// Preview URL Route
 router.post("/preview/:url", async (req, res) => {
   const { url } = req.params;
 
