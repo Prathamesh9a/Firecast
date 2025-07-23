@@ -14,6 +14,8 @@ import { Clock } from "lucide-react";
 import YouTubeLive from "./YouTubeLive";
 import WebpageEmbed from "./WebpageEmbed";
 import * as pdfjsLib from "pdfjs-dist";
+import { useSelector } from 'react-redux';
+import io from "socket.io-client";
 
 // Set the worker source to the local file in the public folder
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -53,7 +55,7 @@ const defaultSettings = {
     visible: true,
   },
   temperature: {
-    position: "bottom-left",
+    position: "top-left",
     visible: true,
   },
 };
@@ -64,61 +66,12 @@ const cache = {
   news: { data: null, timestamp: null, ttl: 30 * 60 * 1000 }, // 30 minutes
 };
 
-// Supported video extensions and their MIME types
 const videoExtensions = [
-  { ext: ".mp4", mime: "video/mp4" },
-  { ext: ".mov", mime: "video/quicktime" },
-  { ext: ".webm", mime: "video/webm" },
+  { ext: ".mp4", type: "video/mp4" },
+  { ext: ".mov", type: "video/quicktime" },
+  { ext: ".webm", type: "video/webm" },
 ];
 
-// Clock Component to isolate dateTime updates
-const ClockDisplay = React.memo(({ position, visible }) => {
-  const [dateTime, setDateTime] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setDateTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (!visible) return null;
-
-  // Map position to Tailwind classes
-  const positionClasses = {
-    "top-left": "top-4 left-4",
-    "top-right": "top-4 right-4",
-    "bottom-left": "bottom-4 left-4",
-    "bottom-right": "bottom-4 right-4",
-  };
-
-  return (
-    <div
-      className={`absolute ${positionClasses[position] || "top-4 right-4"} flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
-    >
-      <Clock className="w-6 h-6 text-yellow-400" />
-      <div className="text-right">
-        <p className="text-sm font-medium opacity-80">
-          {dateTime
-            .toLocaleDateString("en-IN", {
-              weekday: "short",
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            })
-            .toUpperCase()}
-        </p>
-        <p className="text-xl font-bold tracking-wider">
-          {dateTime.toLocaleTimeString("en-IN", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          })}
-        </p>
-      </div>
-    </div>
-  );
-});
 
 // Temperature & AQI Component
 const TemperatureDisplay = React.memo(({ weather, position, visible }) => {
@@ -534,7 +487,6 @@ const DocumentContent = React.memo(
   }
 );
 
-// CHANGED: Updated MediaItem to throttle onTimeUpdate and fix video glitches
 const MediaItem = React.memo(
   ({
     content,
@@ -550,11 +502,12 @@ const MediaItem = React.memo(
     const [error, setError] = useState(null);
     const [fallbackSrc, setFallbackSrc] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [videoReady, setVideoReady] = useState(false); // New state to track when video is actually ready
+    const [videoReady, setVideoReady] = useState(false);
     const [requiresInteraction, setRequiresInteraction] = useState(false);
     const timeoutRef = useRef(null);
     const lastUpdateRef = useRef(0);
-    const throttleInterval = 500; // Update progress every 500ms
+    const throttleInterval = 500;
+    const hasResetRef = useRef(false); // Track if we've already reset in the current loop
 
     useEffect(() => {
       if (
@@ -582,7 +535,33 @@ const MediaItem = React.memo(
         setProgress((e.target.currentTime / e.target.duration) * 100);
         lastUpdateRef.current = now;
       }
-    }, [setProgress]);
+
+      // Check if we're within 1000ms of the end of the video
+      const video = e.target;
+      if (video.duration - video.currentTime <= 1.0 && !isPaused && !hasResetRef.current) {
+        hasResetRef.current = true; // Prevent multiple resets in the same loop
+        // Pause the video to stop playback
+        video.pause();
+        // Reset to the beginning
+        video.currentTime = 0;
+        // Resume playback after a delay
+        setTimeout(() => {
+          if (!isPaused) {
+            video.play().catch((err) => {
+              console.error("Error replaying video on pre-emptive reset:", err);
+              setError({
+                message: `Failed to replay video: ${err.message}`,
+                details: {
+                  code: err.code || "N/A",
+                  userAgent: navigator.userAgent,
+                },
+              });
+            });
+          }
+          hasResetRef.current = false; // Allow reset in the next loop
+        }, 200);
+      }
+    }, [setProgress, isPaused]);
 
     const handleManualPlay = () => {
       if (videoRef.current) {
@@ -603,6 +582,69 @@ const MediaItem = React.memo(
       }
     };
 
+    const handleError = useCallback((e) => {
+      const video = videoRef.current;
+      const errorDetails = {
+        message: e.target.error?.message || "Unknown video error",
+        code: e.target.error?.code || "N/A",
+        userAgent: navigator.userAgent,
+        src: e.target.currentSrc,
+      };
+
+
+
+
+      if (video && video.currentTime >= video.duration - 0.1) {
+        console.warn("End of video reached. Reloading video source:", errorDetails);
+
+        try {
+          const currentSrc = video.currentSrc || video.src;
+          if (!currentSrc) {
+            throw new Error("No video source found to reload.");
+          }
+
+          video.pause();
+          video.src = ''; // Clear current source
+          video.load();    // Reset video element
+
+          video.src = currentSrc; // Re-assign the original source
+          video.load(); // Load the video again
+
+          if (!isPaused) {
+            video.play().catch((err) => {
+              console.error("Failed to autoplay after reload:", err);
+              setError({
+                message: `Failed to replay video after reload: ${err.message}`,
+                details: {
+                  code: err.code || "N/A",
+                  userAgent: navigator.userAgent,
+                },
+              });
+            });
+          }
+        } catch (err) {
+          console.error("Video reload error:", err);
+          setError({
+            message: `Error while reloading video: ${err.message}`,
+            details: {
+              userAgent: navigator.userAgent,
+            },
+          });
+        }
+
+        return;
+      }
+
+
+      console.error("Video error:", errorDetails);
+      setIsLoading(false);
+      setVideoReady(false);
+      setError({
+        message: `Video failed to load`,
+        details: errorDetails,
+      });
+    }, [isPaused]);
+
     useEffect(() => {
       if (
         !videoRef.current ||
@@ -617,81 +659,62 @@ const MediaItem = React.memo(
       }
 
       setIsLoading(true);
-      setVideoReady(false); // Reset video ready state
+      setVideoReady(false);
       const video = videoRef.current;
 
-      const handleCanPlay = () => {
-        console.log(`Video can play: ${video.src}`);
-        // Only set videoReady to true, keep isLoading true until we actually start playing
-        setVideoReady(true);
-        setError(null);
-        
-        if (!isPaused && !requiresInteraction) {
-          video.play().then(() => {
-            // Once video is actually playing, we can hide the loader
-            setIsLoading(false);
-          }).catch((err) => {
-            console.error("Playback failed after canplay:", err);
-            setIsLoading(false); // Hide loader on error
-            if (err.name === "NotAllowedError") {
-              setRequiresInteraction(true);
-              setError({
-                message: "Autoplay blocked: User interaction required",
-                details: {
-                  code: "NotAllowedError",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            } else {
-              setError({
-                message: `Video playback failed: ${err.message}`,
-                details: {
-                  code: err.code || "N/A",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            }
-          });
-        } else {
-          // For paused videos, hide the loader once we know the video can play
-          setIsLoading(false);
-        }
-      };
 
-      const handleError = (e) => {
-        const errorDetails = {
-          message: e.target.error?.message || "Unknown video error",
-          code: e.target.error?.code || "N/A",
-          userAgent: navigator.userAgent,
-        };
-        console.error("Video error:", errorDetails);
-        setIsLoading(false);
-        setVideoReady(false);
-        setError({
-          message: `Video failed to load: ${errorDetails.message}`,
-          details: errorDetails,
+      // New play function — separated
+      const attemptToPlayVideo = () => {
+        if (!video) return;
+
+        video.play().then(() => {
+          setIsLoading(false);
+        }).catch((err) => {
+          console.error("Playback failed:", err);
+          setIsLoading(false);
+
+          if (err.name === "NotAllowedError") {
+            setRequiresInteraction(true);
+            setError({
+              message: "Autoplay blocked: User interaction required",
+              details: {
+                code: "NotAllowedError",
+                userAgent: navigator.userAgent,
+              },
+            });
+          } else {
+            setError({
+              message: `Video playback failed: ${err.message}`,
+              details: {
+                code: err.code || "N/A",
+                userAgent: navigator.userAgent,
+              },
+            });
+          }
         });
       };
 
-      timeoutRef.current = setTimeout(() => {
-        if (isLoading) {
-          console.warn("Video loading timed out");
+      // CanPlay event handler — calls play function conditionally
+      const handleCanPlay = () => {
+        if (!video) return;
+
+        console.log(`Video can play: ${video.src}`);
+        setVideoReady(true);
+        setError(null);
+
+        if (!isPaused && !requiresInteraction) {
+          attemptToPlayVideo();
+        } else {
           setIsLoading(false);
-          setError({
-            message: "Video took too long to load",
-            details: {
-              code: "TIMEOUT",
-              userAgent: navigator.userAgent,
-            },
-          });
         }
-      }, 10000);
+      };
+
 
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
       video.addEventListener("error", handleError);
-      
-      // Additional event to ensure we catch when video actually starts playing
+      video.addEventListener("timeupdate", handleTimeUpdate);
+
       const handlePlaying = () => {
         console.log("Video is now playing");
         setIsLoading(false);
@@ -722,12 +745,13 @@ const MediaItem = React.memo(
         video.removeEventListener("canplay", handleCanPlay);
         video.removeEventListener("loadeddata", handleCanPlay);
         video.removeEventListener("error", handleError);
+        video.removeEventListener("timeupdate", handleTimeUpdate);
         video.removeEventListener("playing", handlePlaying);
         if (timeoutRef.current) {
           clearTimeout(timeoutRef.current);
         }
       };
-    }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction]);
+    }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction, handleTimeUpdate, handleError]);
 
     if (!content || !content.content) {
       console.warn(`MediaItem: No content provided for index ${index}`, {
@@ -768,14 +792,11 @@ const MediaItem = React.memo(
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              {/* Video element is always rendered but only visible when not loading */}
               <video
                 ref={videoRef}
                 autoPlay={!isPaused}
-                loop
                 muted
                 className={`w-full h-full object-contain ${isLoading ? 'opacity-0' : 'opacity-100'}`}
-                onTimeUpdate={handleTimeUpdate}
                 style={{ transition: 'opacity 0.3s ease' }}
               >
                 <source
@@ -784,21 +805,19 @@ const MediaItem = React.memo(
                     videoSrc.toLowerCase().endsWith(".mp4")
                       ? "video/mp4"
                       : isMov
-                      ? "video/quicktime"
-                      : "video/webm"
+                        ? "video/quicktime"
+                        : "video/webm"
                   }
                 />
                 Your browser does not support the video tag.
               </video>
-              
-              {/* Loading overlay only shown while loading */}
+
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
                 </div>
               )}
-              
-              {/* Error overlay only shown on error */}
+
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>
@@ -863,12 +882,10 @@ const MediaItem = React.memo(
         </div>
       );
     } else {
-      // Image content
       return (
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              {/* Image is always rendered but only visible when loaded */}
               <img
                 src={contentUrl}
                 alt="Preview content"
@@ -891,15 +908,11 @@ const MediaItem = React.memo(
                   });
                 }}
               />
-              
-              {/* Loading overlay */}
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
                 </div>
               )}
-              
-              {/* Error overlay */}
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>
@@ -947,6 +960,31 @@ const Preview = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(defaultSettings);
   const controlTimeoutRef = useRef(null);
+  const [socket, setSocket] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputMessage, setInputMessage] = useState('');
+
+  function Preview() {
+    const mediaItems = useSelector((state) => state.media.mediaItems);
+
+    return (
+      <div>
+        <h1>Preview Page</h1>
+        {mediaItems.length === 0 ? (
+          <p>No media available</p>
+        ) : (
+          mediaItems.map((item, index) => (
+            <div key={index}>
+              <p>{item.name}</p>
+              <video src={item.url} controls width="300" />
+            </div>
+          ))
+        )}
+      </div>
+    );
+  }
+
+
 
   // Function to reset the control visibility timeout
   const resetControlTimeout = useCallback(() => {
@@ -958,6 +996,7 @@ const Preview = () => {
       setShowControls(false);
     }, 5000); // Hide controls after 5 seconds
   }, []);
+
 
   // Handle mouse movement to show controls and reset the timeout
   useEffect(() => {
@@ -1081,7 +1120,6 @@ const Preview = () => {
       if (schedule.timeWindows && schedule.timeWindows.length > 0) {
         isWithinTimeWindow = schedule.timeWindows.some((timeWindow) => {
           const isActive = isTimeWindowActive(timeWindow);
-          console.log("Time window check:", { timeWindow, isActive });
           return isActive;
         });
       } else if (schedule.startTime && schedule.endTime) {
@@ -1181,11 +1219,13 @@ const Preview = () => {
     [isScheduledNow]
   );
 
+
   const stableCacheBuster = useMemo(() => Date.now(), []);
 
   const getContentUrl = useCallback(
-    (content, cacheBuster = url === "Automate" ? stableCacheBuster : "static") => {
+    (content) => {
       if (!content) return "";
+
       const prefix = "/api/upload/preview/";
       let baseUrl;
 
@@ -1199,12 +1239,15 @@ const Preview = () => {
           : `${apiBaseUrl}/${content}`;
       }
 
-      const cacheBusterParam = `t=${cacheBuster}`;
+      const cacheBusterValue = url === "Automate" ? stableCacheBuster : "static";
+      const cacheBusterParam = `t=${cacheBusterValue}`;
       const separator = baseUrl.includes("?") ? "&" : "?";
+
       return `${baseUrl}${separator}${cacheBusterParam}`;
     },
     [url, stableCacheBuster]
   );
+
 
   const preloadMedia = useCallback(
     (content) => {
@@ -1219,8 +1262,8 @@ const Preview = () => {
           )
             ? "video"
             : item.content.endsWith(".pdf")
-            ? "fetch"
-            : "image";
+              ? "fetch"
+              : "image";
           link.onerror = () => console.error(`Wait Your Content Is Loading ${url}`);
           document.head.appendChild(link);
         }
@@ -1313,30 +1356,215 @@ const Preview = () => {
     }
   }, [url, getActiveContent, groupMediaByLayout, preloadMedia]);
 
-  const fetchWeather = useCallback(async (location = "Mumbai") => {
-    if (!weatherApiKey) {
-      console.error("Weather API key is missing.");
-      return;
-    }
-    const now = Date.now();
-    if (
-      cache.weather.data &&
-      cache.weather.timestamp &&
-      now - cache.weather.timestamp < cache.weather.ttl
-    ) {
-      setWeather(cache.weather.data);
-      return;
-    }
-    try {
-      const url = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${location}&aqi=yes`;
-      const response = await axios.get(url, { timeout: 5000 });
-      cache.weather.data = response.data;
-      cache.weather.timestamp = now;
-      setWeather(response.data);
-    } catch (error) {
-      console.error("Error fetching weather:", error);
-    }
-  }, []);
+  // Clock Component to isolate dateTime updates
+  const ClockDisplay = React.memo(({ position = "top-right", visible = true }) => {
+    const [dateTime, setDateTime] = useState(new Date());
+    const [locationName, setLocationName] = useState("Your Location");
+    const [userTimeZone, setUserTimeZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+    const weatherApiKey = process.env.REACT_APP_WEATHER_API_KEY; // Set in .env
+
+    useEffect(() => {
+      const fetchLocationTimeZone = async () => {
+        try {
+          // First try to get accurate location using browser geolocation
+          const location = await getCurrentPosition();
+
+          if (location) {
+            // Use precise lat,lng coordinates
+            const res = await axios.get(
+              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${location.latitude},${location.longitude}&aqi=no`
+            );
+
+            const { location: weatherLocation } = res.data;
+            setLocationName(`${weatherLocation.name}, ${weatherLocation.region}`);
+            setUserTimeZone(weatherLocation.tz_id);
+          } else {
+            // Fallback to IP-based location (less accurate)
+            const res = await axios.get(
+              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=auto:ip&aqi=no`
+            );
+
+            const { location } = res.data;
+            setLocationName(`${location.name}, ${location.region} (IP-based)`);
+            setUserTimeZone(location.tz_id);
+          }
+        } catch (error) {
+          console.error("Failed to fetch location from WeatherAPI:", error.message);
+          setLocationName("Your Location");
+        }
+      };
+
+      if (weatherApiKey) {
+        fetchLocationTimeZone();
+      }
+    }, [weatherApiKey]);
+
+    useEffect(() => {
+      const timer = setInterval(() => setDateTime(new Date()), 1000);
+      return () => clearInterval(timer);
+    }, []);
+
+    if (!visible) return null;
+
+    const positionClasses = {
+      "top-left": "top-4 left-4",
+      "top-right": "top-4 right-4",
+      "bottom-left": "bottom-4 left-4",
+      "bottom-right": "bottom-4 right-4",
+    };
+
+    return (
+      <div
+        className={`absolute ${positionClasses[position] || "top-4 right-4"} flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
+      >
+        <Clock className="w-6 h-6 text-yellow-400" />
+        <div className="text-right">
+          <p className="text-sm font-medium opacity-80">
+            {dateTime
+              .toLocaleDateString("en-IN", {
+                weekday: "short",
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                timeZone: userTimeZone,
+              })
+              .toUpperCase()}
+          </p>
+          <p className="text-xl font-bold tracking-wider">
+            {dateTime.toLocaleTimeString("en-IN", {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+              timeZone: userTimeZone,
+            })}
+          </p>
+        </div>
+      </div>
+    );
+  });
+
+  // Helper function to get accurate geolocation
+  const getCurrentPosition = () => {
+    return new Promise((resolve) => {
+      // Check if geolocation is supported
+      if (!navigator.geolocation) {
+        console.warn("Geolocation is not supported by this browser");
+        resolve(null);
+        return;
+      }
+
+      // Enhanced geolocation options for better accuracy
+      const options = {
+        enableHighAccuracy: true,    // Use GPS if available
+        timeout: 15000,              // 15 second timeout
+        maximumAge: 300000           // Accept cached position up to 5 minutes old
+      };
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          console.log("Geolocation success:", {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          });
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
+          });
+        },
+        (error) => {
+          console.warn("Geolocation error:", error.message);
+          // Handle different error types
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              console.warn("User denied geolocation permission");
+              break;
+            case error.POSITION_UNAVAILABLE:
+              console.warn("Location information is unavailable");
+              break;
+            case error.TIMEOUT:
+              console.warn("Geolocation request timed out");
+              break;
+            default:
+              console.warn("Unknown geolocation error");
+              break;
+          }
+          resolve(null);
+        },
+        options
+      );
+    });
+  };
+
+  const fetchWeather = useCallback(
+    async (location = "Ohio") => {
+      if (!weatherApiKey) {
+        console.error("Weather API key is missing.");
+        return;
+      }
+
+      const now = Date.now();
+
+      // Use cached data if it's fresh
+      if (
+        cache.weather.data &&
+        cache.weather.timestamp &&
+        now - cache.weather.timestamp < cache.weather.ttl
+      ) {
+        setWeather(cache.weather.data);
+        return;
+      }
+
+      try {
+        let weatherLocation = location;
+
+        // Try to get accurate location first
+        if (location === "auto" || location === "Ohio") {
+          const position = await getCurrentPosition();
+          if (position) {
+            weatherLocation = `${position.latitude},${position.longitude}`;
+            console.log("Using accurate coordinates for weather:", weatherLocation);
+          } else {
+            // Only fallback to IP-based location if geolocation fails
+            weatherLocation = "auto:ip";
+            console.log("Falling back to IP-based location for weather");
+          }
+        }
+
+        const url = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${weatherLocation}&aqi=no`;
+        const response = await axios.get(url, { timeout: 8000 });
+
+        // Cache it
+        cache.weather.data = response.data;
+        cache.weather.timestamp = now;
+        setWeather(response.data);
+      } catch (error) {
+        console.error("Error fetching weather:", error);
+      }
+    },
+    [weatherApiKey]
+  );
+
+  const getUserLocation = useCallback(() => {
+    // Always try geolocation first regardless of protocol
+    // Modern browsers handle HTTPS requirement internally
+    getCurrentPosition().then((position) => {
+      if (position) {
+        fetchWeather(`${position.latitude},${position.longitude}`);
+      } else {
+        // Only use IP-based location as last resort
+        console.log("Using IP-based location as fallback");
+        fetchWeather("auto:ip");
+      }
+    });
+  }, [fetchWeather]);
+
+  // Call once on mount
+  useEffect(() => {
+    getUserLocation();
+  }, [getUserLocation]);
 
   const fetchNews = useCallback(async () => {
     const now = Date.now();
@@ -1350,10 +1578,14 @@ const Preview = () => {
     }
     try {
       const feeds = [
-        "https://timesofindia.indiatimes.com/rssfeeds/1898055.cms",
-        "https://www.businesstoday.in/rssfeeds/30562834.rss",
-        "https://economictimes.indiatimes.com/rssfeedsdefault.cms",
-        "https://www.business-standard.com/rss/latest.rss",
+        "https://rss.cnn.com/rss/edition.rss",
+        "https://feeds.nbcnews.com/nbcnews/public/news",
+        "https://feeds.washingtonpost.com/rss/national",
+        "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
+        "https://feeds.reuters.com/reuters/topNews",
+        "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
+        "https://feeds.abcnews.go.com/abcnews/topstories",
+        "https://feeds.foxnews.com/foxnews/latest",
       ];
       const responses = await Promise.all(
         feeds.map((feed) =>
@@ -1385,7 +1617,6 @@ const Preview = () => {
       setNews([]);
     }
   }, []);
-
   const updateVisibleItems = useCallback(
     (layout, groupedContent, index) => {
       const layoutConfig =
@@ -1417,31 +1648,12 @@ const Preview = () => {
       const start = index;
       const end = Math.min(start + itemsPerPage, allItems.length);
       const itemsToDisplay = allItems.slice(start, end);
-      console.log("Updating visible items:", { layout, index, itemsToDisplay });
       setVisibleItems(
         itemsToDisplay.length > 0 ? itemsToDisplay : [fallbackItem]
       );
     },
     [mediaContent]
   );
-
-  const getUserLocation = useCallback(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          fetchWeather(`${latitude},${longitude}`);
-        },
-        (error) => {
-          console.error("Error getting location:", error);
-          fetchWeather("Mumbai");
-        }
-      );
-    } else {
-      console.error("Geolocation is not supported by this browser.");
-      fetchWeather("Mumbai");
-    }
-  }, [fetchWeather]);
 
   const isWebpageUrl = useCallback(
     (url) => {
@@ -1643,7 +1855,6 @@ const Preview = () => {
     if (mediaContent.length === 0 || !isEnabled || isPaused) {
       setActiveSlideshow(false);
       if (mediaContent.length === 0 || !isEnabled) {
-        console.warn("No media content or disabled, using fallback");
         setVisibleItems([fallbackItem]);
       }
       return;
@@ -1684,8 +1895,15 @@ const Preview = () => {
         setCurrentLayout(firstLayout);
         updateVisibleItems(firstLayout, groupedContent, 0);
         console.log("Completed one loop, fetching new data");
-        // window.location.reload(); // Call API to refresh content
-        fetchData();
+
+        // If URL is "Automate", clear the cache and hard refresh
+        if (url === "Automate") {
+          const cacheKey = `preview_${url}_${Date.now()}`; // Matches the cache key used in fetchData
+          localStorage.removeItem(cacheKey); // Clear the cache
+          window.location.reload(true); // Hard refresh the page
+        } else {
+          fetchData(); // Otherwise, just fetch new data without a hard refresh
+        }
       } else {
         // Move to next set of items
         setCurrentIndex(nextIndex);
@@ -1727,7 +1945,8 @@ const Preview = () => {
           formatTimeRemaining
         )
       ) : mediaContent.length > 0 ? (
-        <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
+        // <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
+        <div className={`grid w-full h-screen gap-2 ${getGridClasses()}`}>
           {visibleItems.map((item, index) => (
             <div
               key={index}
@@ -1788,7 +2007,6 @@ const Preview = () => {
         >
           <div className="news-ticker-container relative w-full">
             <div
-              // key={`ticker-${settings.ticker.speed}`} // Force re-render on speed change
               key={`ticker-${settings.ticker.speed}-${settings.ticker.fontSize}`}
               className="news-ticker"
               style={{
@@ -1799,7 +2017,6 @@ const Preview = () => {
                 fontSize: `${settings.ticker.fontSize}px`,
               }}
             >
-              {console.log("Ticker Font Size:", settings.ticker.fontSize)}
               {customTicker ? (
                 <span className="news-item inline-block px-6 text-white">
                   {customTicker}

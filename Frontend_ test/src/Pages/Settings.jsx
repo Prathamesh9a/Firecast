@@ -10,7 +10,7 @@ import { useSettings } from "./SettingsContext";
 const defaultSettings = {
   ticker: {
     speed: 500,
-    height: 48,
+    height: 50,
     fontSize: 16,
     visible: true,
   },

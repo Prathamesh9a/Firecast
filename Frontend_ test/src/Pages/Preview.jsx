@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
-import axios from "axios";
 import { useParams } from "react-router-dom";
 import { useInView } from "react-intersection-observer";
+import io from "socket.io-client";
 import {
   FaPlay,
   FaPause,
@@ -15,7 +15,8 @@ import YouTubeLive from "./YouTubeLive";
 import WebpageEmbed from "./WebpageEmbed";
 import * as pdfjsLib from "pdfjs-dist";
 import { useSelector } from 'react-redux';
-
+import axios from "axios";
+import Swal from "sweetalert2";
 
 // Set the worker source to the local file in the public folder
 pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
@@ -72,12 +73,10 @@ const videoExtensions = [
   { ext: ".webm", type: "video/webm" },
 ];
 
-
 // Temperature & AQI Component
 const TemperatureDisplay = React.memo(({ weather, position, visible }) => {
   if (!visible || !weather) return null;
 
-  // Map position to Tailwind classes
   const positionClasses = {
     "top-left": "top-4 left-4",
     "top-right": "top-4 right-4",
@@ -463,8 +462,8 @@ const DocumentContent = React.memo(
                   Wait Your Content Is Loading
                 </p>
                 <p className="text-lg">
-                  {/* The document may not have been converted to PDF correctly.
-                  Please contact support. */}
+                  The document may not have been converted to PDF correctly.
+                  Please contact support.
                 </p>
               </div>
             </div>
@@ -487,6 +486,7 @@ const DocumentContent = React.memo(
   }
 );
 
+// MediaItem Component
 const MediaItem = React.memo(
   ({
     content,
@@ -507,7 +507,7 @@ const MediaItem = React.memo(
     const timeoutRef = useRef(null);
     const lastUpdateRef = useRef(0);
     const throttleInterval = 500;
-    const hasResetRef = useRef(false); // Track if we've already reset in the current loop
+    const hasResetRef = useRef(false);
 
     useEffect(() => {
       if (
@@ -536,15 +536,11 @@ const MediaItem = React.memo(
         lastUpdateRef.current = now;
       }
 
-      // Check if we're within 1000ms of the end of the video
       const video = e.target;
       if (video.duration - video.currentTime <= 1.0 && !isPaused && !hasResetRef.current) {
-        hasResetRef.current = true; // Prevent multiple resets in the same loop
-        // Pause the video to stop playback
+        hasResetRef.current = true;
         video.pause();
-        // Reset to the beginning
         video.currentTime = 0;
-        // Resume playback after a delay
         setTimeout(() => {
           if (!isPaused) {
             video.play().catch((err) => {
@@ -558,7 +554,7 @@ const MediaItem = React.memo(
               });
             });
           }
-          hasResetRef.current = false; // Allow reset in the next loop
+          hasResetRef.current = false;
         }, 200);
       }
     }, [setProgress, isPaused]);
@@ -591,25 +587,18 @@ const MediaItem = React.memo(
         src: e.target.currentSrc,
       };
 
-
-
-
       if (video && video.currentTime >= video.duration - 0.1) {
         console.warn("End of video reached. Reloading video source:", errorDetails);
-
         try {
           const currentSrc = video.currentSrc || video.src;
           if (!currentSrc) {
             throw new Error("No video source found to reload.");
           }
-
           video.pause();
-          video.src = ''; // Clear current source
-          video.load();    // Reset video element
-
-          video.src = currentSrc; // Re-assign the original source
-          video.load(); // Load the video again
-
+          video.src = '';
+          video.load();
+          video.src = currentSrc;
+          video.load();
           if (!isPaused) {
             video.play().catch((err) => {
               console.error("Failed to autoplay after reload:", err);
@@ -631,10 +620,8 @@ const MediaItem = React.memo(
             },
           });
         }
-
         return;
       }
-
 
       console.error("Video error:", errorDetails);
       setIsLoading(false);
@@ -662,17 +649,13 @@ const MediaItem = React.memo(
       setVideoReady(false);
       const video = videoRef.current;
 
-
-      // New play function — separated
       const attemptToPlayVideo = () => {
         if (!video) return;
-
         video.play().then(() => {
           setIsLoading(false);
         }).catch((err) => {
           console.error("Playback failed:", err);
           setIsLoading(false);
-
           if (err.name === "NotAllowedError") {
             setRequiresInteraction(true);
             setError({
@@ -694,21 +677,17 @@ const MediaItem = React.memo(
         });
       };
 
-      // CanPlay event handler — calls play function conditionally
       const handleCanPlay = () => {
         if (!video) return;
-
         console.log(`Video can play: ${video.src}`);
         setVideoReady(true);
         setError(null);
-
         if (!isPaused && !requiresInteraction) {
           attemptToPlayVideo();
         } else {
           setIsLoading(false);
         }
       };
-
 
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
@@ -937,10 +916,128 @@ const MediaItem = React.memo(
   }
 );
 
+// Clock Component
+const ClockDisplay = React.memo(({ position = "top-right", visible = true }) => {
+  const [dateTime, setDateTime] = useState(new Date());
+  const [locationName, setLocationName] = useState("Your Location");
+  const [userTimeZone, setUserTimeZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
+
+  useEffect(() => {
+    const fetchLocationTimeZone = async () => {
+      try {
+        const position = await getCurrentPosition();
+        if (position) {
+          const res = await axios.get(
+            `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${position.latitude},${position.longitude}&aqi=no`
+          );
+          const { location: weatherLocation } = res.data;
+          setLocationName(`${weatherLocation.name}, ${weatherLocation.region}`);
+          setUserTimeZone(weatherLocation.tz_id);
+        } else {
+          const res = await axios.get(
+            `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=auto:ip&aqi=no`
+          );
+          const { location } = res.data;
+          setLocationName(`${location.name}, ${location.region} (IP-based)`);
+          setUserTimeZone(location.tz_id);
+        }
+      } catch (error) {
+        console.error("Failed to fetch location from WeatherAPI:", error.message);
+        setLocationName("Your Location");
+      }
+    };
+
+    if (weatherApiKey) {
+      fetchLocationTimeZone();
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setDateTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!visible) return null;
+
+  const positionClasses = {
+    "top-left": "top-4 left-4",
+    "top-right": "top-4 right-4",
+    "bottom-left": "bottom-4 left-4",
+    "bottom-right": "bottom-4 right-4",
+  };
+
+  return (
+    <div
+      className={`absolute ${positionClasses[position] || "top-4 right-4"} flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
+    >
+      <Clock className="w-6 h-6 text-yellow-400" />
+      <div className="text-right">
+        <p className="text-sm font-medium opacity-80">
+          {dateTime
+            .toLocaleDateString("en-IN", {
+              weekday: "short",
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              timeZone: userTimeZone,
+            })
+            .toUpperCase()}
+        </p>
+        <p className="text-xl font-bold tracking-wider">
+          {dateTime.toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: userTimeZone,
+          })}
+        </p>
+      </div>
+    </div>
+  );
+});
+
+// Helper function to get accurate geolocation
+const getCurrentPosition = () => {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) {
+      console.warn("Geolocation is not supported by this browser");
+      resolve(null);
+      return;
+    }
+
+    const options = {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 300000
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        console.log("Geolocation success:", {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        });
+      },
+      (error) => {
+        console.warn("Geolocation error:", error.message);
+        resolve(null);
+      },
+      options
+    );
+  });
+};
+
 const Preview = () => {
   const { url } = useParams();
+  const mediaItems = useSelector((state) => state.media.mediaItems);
   const [mediaContent, setMediaContent] = useState([]);
-  const [isEnabled, setIsEnabled] = useState(true);
+  const [isEnabled, setIsEnabled] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [showControls, setShowControls] = useState(true);
@@ -960,33 +1057,10 @@ const Preview = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(defaultSettings);
   const controlTimeoutRef = useRef(null);
-  const [socket, setSocket] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [inputMessage, setInputMessage] = useState('');
+  const socketRef = useRef(null);
+  const pollingRef = useRef(null);
+  const lastFetchRef = useRef(0);
 
-  function Preview() {
-    const mediaItems = useSelector((state) => state.media.mediaItems);
-
-    return (
-      <div>
-        <h1>Preview Page</h1>
-        {mediaItems.length === 0 ? (
-          <p>No media available</p>
-        ) : (
-          mediaItems.map((item, index) => (
-            <div key={index}>
-              <p>{item.name}</p>
-              <video src={item.url} controls width="300" />
-            </div>
-          ))
-        )}
-      </div>
-    );
-  }
-
-
-
-  // Function to reset the control visibility timeout
   const resetControlTimeout = useCallback(() => {
     if (controlTimeoutRef.current) {
       clearTimeout(controlTimeoutRef.current);
@@ -994,24 +1068,8 @@ const Preview = () => {
     setShowControls(true);
     controlTimeoutRef.current = setTimeout(() => {
       setShowControls(false);
-    }, 5000); // Hide controls after 5 seconds
+    }, 5000);
   }, []);
-
-
-  // Handle mouse movement to show controls and reset the timeout
-  useEffect(() => {
-    const handleMouseMove = () => {
-      resetControlTimeout();
-    };
-
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      if (controlTimeoutRef.current) {
-        clearTimeout(controlTimeoutRef.current);
-      }
-    };
-  }, [resetControlTimeout]);
 
   const togglePlayPause = useCallback(() => {
     setIsPaused((prev) => {
@@ -1166,7 +1224,6 @@ const Preview = () => {
 
       const priorityOrder = { high: 3, medium: 2, low: 1 };
 
-      // Check for exclusive, high-priority content
       const exclusiveHighPriorityContent = content.filter(
         (item) =>
           item?.schedule &&
@@ -1176,7 +1233,6 @@ const Preview = () => {
       );
 
       if (exclusiveHighPriorityContent.length > 0) {
-        // Warn if exclusive content has no time restrictions
         exclusiveHighPriorityContent.forEach((item) => {
           if (
             (!item.schedule.timeWindows ||
@@ -1205,7 +1261,6 @@ const Preview = () => {
         });
       }
 
-      // Fallback to all active content
       const activeContent = content.filter(
         (item) => item?.schedule && isScheduledNow(item.schedule)
       );
@@ -1218,7 +1273,6 @@ const Preview = () => {
     },
     [isScheduledNow]
   );
-
 
   const stableCacheBuster = useMemo(() => Date.now(), []);
 
@@ -1248,7 +1302,6 @@ const Preview = () => {
     [url, stableCacheBuster]
   );
 
-
   const preloadMedia = useCallback(
     (content) => {
       (content || []).slice(0, 3).forEach((item) => {
@@ -1272,232 +1325,6 @@ const Preview = () => {
     [getContentUrl]
   );
 
-  const fetchData = useCallback(async () => {
-    // Use a static cache key unless url is 'Automate'
-    const cacheKey = url === "Automate" ? `preview_${url}_${Date.now()}` : `preview_${url}`;
-    const cachedData = localStorage.getItem(cacheKey);
-    if (cachedData) {
-      try {
-        const parsedData = JSON.parse(cachedData);
-        const cacheTimestamp = parsedData.timestamp || 0;
-        const cacheTTL = 20 * 60 * 60 * 1000; // 20 hours in milliseconds
-        if (Date.now() - cacheTimestamp < cacheTTL) {
-          const activeContent = getActiveContent(parsedData.url_content || []);
-          setMediaContent(activeContent);
-          console.log("Loaded cached content:", activeContent);
-          setIsEnabled(parsedData.isEnabled ?? true);
-          setScheduledAt(
-            parsedData.scheduledAt ? new Date(parsedData.scheduledAt) : null
-          );
-          setExpiresAt(
-            parsedData.expiresAt ? new Date(parsedData.expiresAt) : null
-          );
-          setCustomTicker(parsedData.custom_ticker || null);
-          setSettings(parsedData.settings || defaultSettings);
-          if (activeContent.length > 0) {
-            setCurrentIndex(0);
-            const firstLayout = activeContent[0].layout || "single";
-            setCurrentLayout(firstLayout);
-            const groupedContent = groupMediaByLayout(activeContent);
-            updateVisibleItems(firstLayout, groupedContent, 0);
-          }
-        } else {
-          console.log("Cached data expired, fetching new data");
-        }
-      } catch (error) {
-        console.error("Error parsing cached data:", error);
-      }
-    }
-
-    setIsLoading(true);
-    try {
-      // Conditionally set headers based on url
-      const headers = url === "Automate" ? { "Cache-Control": "no-cache" } : {};
-      const response = await axios.post(
-        `${apiBaseUrl}/api/upload/preview/${url}`,
-        { headers }
-      );
-      if (response.data) {
-        localStorage.setItem(cacheKey, JSON.stringify(response.data));
-        const content = response.data.url_content || [];
-        setAllContent(content);
-        const activeContent = getActiveContent(content);
-        setMediaContent(activeContent);
-        console.log("Fetched content:", activeContent);
-        if (activeContent.length > 0) {
-          setCurrentIndex(0);
-          const firstLayout = activeContent[0].layout || "single";
-          setCurrentLayout(firstLayout);
-          const groupedContent = groupMediaByLayout(activeContent);
-          updateVisibleItems(firstLayout, groupedContent, 0);
-          preloadMedia(activeContent);
-        } else {
-          console.warn("No active content available, using fallback");
-          setVisibleItems([fallbackItem]);
-        }
-        setIsEnabled(response.data.isEnabled ?? true);
-        setScheduledAt(
-          response.data.scheduledAt ? new Date(response.data.scheduledAt) : null
-        );
-        setExpiresAt(
-          response.data.expiresAt ? new Date(response.data.expiresAt) : null
-        );
-        setCustomTicker(response.data.custom_ticker || null);
-        setSettings(response.data.settings || defaultSettings);
-      } else {
-        console.warn("No data in response, using fallback");
-        setVisibleItems([fallbackItem]);
-      }
-    } catch (error) {
-      console.error("Error fetching preview content:", error);
-      setVisibleItems([fallbackItem]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [url, getActiveContent, groupMediaByLayout, preloadMedia]);
-
-  // Clock Component to isolate dateTime updates
-  const ClockDisplay = React.memo(({ position = "top-right", visible = true }) => {
-    const [dateTime, setDateTime] = useState(new Date());
-    const [locationName, setLocationName] = useState("Your Location");
-    const [userTimeZone, setUserTimeZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
-
-    const weatherApiKey = process.env.REACT_APP_WEATHER_API_KEY; // Set in .env
-
-    useEffect(() => {
-      const fetchLocationTimeZone = async () => {
-        try {
-          // First try to get accurate location using browser geolocation
-          const location = await getCurrentPosition();
-
-          if (location) {
-            // Use precise lat,lng coordinates
-            const res = await axios.get(
-              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${location.latitude},${location.longitude}&aqi=no`
-            );
-
-            const { location: weatherLocation } = res.data;
-            setLocationName(`${weatherLocation.name}, ${weatherLocation.region}`);
-            setUserTimeZone(weatherLocation.tz_id);
-          } else {
-            // Fallback to IP-based location (less accurate)
-            const res = await axios.get(
-              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=auto:ip&aqi=no`
-            );
-
-            const { location } = res.data;
-            setLocationName(`${location.name}, ${location.region} (IP-based)`);
-            setUserTimeZone(location.tz_id);
-          }
-        } catch (error) {
-          console.error("Failed to fetch location from WeatherAPI:", error.message);
-          setLocationName("Your Location");
-        }
-      };
-
-      if (weatherApiKey) {
-        fetchLocationTimeZone();
-      }
-    }, [weatherApiKey]);
-
-    useEffect(() => {
-      const timer = setInterval(() => setDateTime(new Date()), 1000);
-      return () => clearInterval(timer);
-    }, []);
-
-    if (!visible) return null;
-
-    const positionClasses = {
-      "top-left": "top-4 left-4",
-      "top-right": "top-4 right-4",
-      "bottom-left": "bottom-4 left-4",
-      "bottom-right": "bottom-4 right-4",
-    };
-
-    return (
-      <div
-        className={`absolute ${positionClasses[position] || "top-4 right-4"} flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
-      >
-        <Clock className="w-6 h-6 text-yellow-400" />
-        <div className="text-right">
-          <p className="text-sm font-medium opacity-80">
-            {dateTime
-              .toLocaleDateString("en-IN", {
-                weekday: "short",
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                timeZone: userTimeZone,
-              })
-              .toUpperCase()}
-          </p>
-          <p className="text-xl font-bold tracking-wider">
-            {dateTime.toLocaleTimeString("en-IN", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: userTimeZone,
-            })}
-          </p>
-        </div>
-      </div>
-    );
-  });
-
-  // Helper function to get accurate geolocation
-  const getCurrentPosition = () => {
-    return new Promise((resolve) => {
-      // Check if geolocation is supported
-      if (!navigator.geolocation) {
-        console.warn("Geolocation is not supported by this browser");
-        resolve(null);
-        return;
-      }
-
-      // Enhanced geolocation options for better accuracy
-      const options = {
-        enableHighAccuracy: true,    // Use GPS if available
-        timeout: 15000,              // 15 second timeout
-        maximumAge: 300000           // Accept cached position up to 5 minutes old
-      };
-
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          console.log("Geolocation success:", {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            accuracy: position.coords.accuracy
-          });
-          resolve({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy
-          });
-        },
-        (error) => {
-          console.warn("Geolocation error:", error.message);
-          // Handle different error types
-          switch (error.code) {
-            case error.PERMISSION_DENIED:
-              console.warn("User denied geolocation permission");
-              break;
-            case error.POSITION_UNAVAILABLE:
-              console.warn("Location information is unavailable");
-              break;
-            case error.TIMEOUT:
-              console.warn("Geolocation request timed out");
-              break;
-            default:
-              console.warn("Unknown geolocation error");
-              break;
-          }
-          resolve(null);
-        },
-        options
-      );
-    });
-  };
-
   const fetchWeather = useCallback(
     async (location = "Ohio") => {
       if (!weatherApiKey) {
@@ -1506,8 +1333,6 @@ const Preview = () => {
       }
 
       const now = Date.now();
-
-      // Use cached data if it's fresh
       if (
         cache.weather.data &&
         cache.weather.timestamp &&
@@ -1519,15 +1344,12 @@ const Preview = () => {
 
       try {
         let weatherLocation = location;
-
-        // Try to get accurate location first
         if (location === "auto" || location === "Ohio") {
           const position = await getCurrentPosition();
           if (position) {
             weatherLocation = `${position.latitude},${position.longitude}`;
             console.log("Using accurate coordinates for weather:", weatherLocation);
           } else {
-            // Only fallback to IP-based location if geolocation fails
             weatherLocation = "auto:ip";
             console.log("Falling back to IP-based location for weather");
           }
@@ -1535,8 +1357,6 @@ const Preview = () => {
 
         const url = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${weatherLocation}&aqi=no`;
         const response = await axios.get(url, { timeout: 8000 });
-
-        // Cache it
         cache.weather.data = response.data;
         cache.weather.timestamp = now;
         setWeather(response.data);
@@ -1544,27 +1364,19 @@ const Preview = () => {
         console.error("Error fetching weather:", error);
       }
     },
-    [weatherApiKey]
+    []
   );
 
   const getUserLocation = useCallback(() => {
-    // Always try geolocation first regardless of protocol
-    // Modern browsers handle HTTPS requirement internally
     getCurrentPosition().then((position) => {
       if (position) {
         fetchWeather(`${position.latitude},${position.longitude}`);
       } else {
-        // Only use IP-based location as last resort
         console.log("Using IP-based location as fallback");
         fetchWeather("auto:ip");
       }
     });
   }, [fetchWeather]);
-
-  // Call once on mount
-  useEffect(() => {
-    getUserLocation();
-  }, [getUserLocation]);
 
   const fetchNews = useCallback(async () => {
     const now = Date.now();
@@ -1617,6 +1429,7 @@ const Preview = () => {
       setNews([]);
     }
   }, []);
+
   const updateVisibleItems = useCallback(
     (layout, groupedContent, index) => {
       const layoutConfig =
@@ -1762,11 +1575,211 @@ const Preview = () => {
     resetControlTimeout,
   ]);
 
+  const fetchData = useCallback(async (source = "unknown") => {
+    const now = Date.now();
+    const minInterval = 60 * 1000; // 1 minute
+    if (now - lastFetchRef.current < minInterval) {
+      console.log(`fetchData throttled (source: ${source})`);
+      return;
+    }
+    lastFetchRef.current = now;
+
+    setIsLoading(true);
+    try {
+      const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`, { timeout: 10000 });
+      if (response.data) {
+        const cacheKey = `preview_${url}`;
+        localStorage.setItem(cacheKey, JSON.stringify(response.data));
+        const content = response.data.url_content || [];
+        setAllContent(content);
+        const activeContent = getActiveContent(content);
+        setMediaContent(activeContent);
+        console.log("Fetched content:", activeContent);
+        if (activeContent.length > 0) {
+          setCurrentIndex(0);
+          const firstLayout = activeContent[0].layout || "single";
+          setCurrentLayout(firstLayout);
+          const groupedContent = groupMediaByLayout(activeContent);
+          updateVisibleItems(firstLayout, groupedContent, 0);
+          preloadMedia(activeContent);
+        } else {
+          console.warn("No active content available, using fallback");
+          setVisibleItems([fallbackItem]);
+        }
+        const isUrlEnabled = response.data.isEnabled === true;
+        setIsEnabled(isUrlEnabled);
+        setScheduledAt(
+          response.data.scheduledAt ? new Date(response.data.scheduledAt) : null
+        );
+        setExpiresAt(
+          response.data.expiresAt ? new Date(response.data.expiresAt) : null
+        );
+        setCustomTicker(response.data.custom_ticker || null);
+        setSettings(response.data.settings || defaultSettings);
+      } else {
+        console.warn("No data in response, using fallback");
+        setVisibleItems([fallbackItem]);
+      }
+    } catch (error) {
+      console.error(`Error fetching preview content (source: ${source}):`, error);
+      setVisibleItems([fallbackItem]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [url, getActiveContent, groupMediaByLayout, preloadMedia, updateVisibleItems]);
+
+  const handleSocketUpdate = useCallback((data, eventType) => {
+    if (!data || !data.url_content) {
+      console.warn(`Invalid ${eventType} data received:`, data);
+      setVisibleItems([fallbackItem]);
+      return;
+    }
+
+    const cacheKey = `preview_${url}`;
+    localStorage.setItem(cacheKey, JSON.stringify(data));
+    const content = data.url_content || [];
+    setAllContent(content);
+    const activeContent = getActiveContent(content);
+    setMediaContent(activeContent);
+    const isUrlEnabled = data.isEnabled === true;
+    setIsEnabled(isUrlEnabled);
+    setScheduledAt(data.scheduledAt ? new Date(data.scheduledAt) : null);
+    setExpiresAt(data.expiresAt ? new Date(data.expiresAt) : null);
+    setCustomTicker(data.custom_ticker || null);
+    setSettings(data.settings || defaultSettings);
+
+    if (activeContent.length > 0) {
+      setCurrentIndex(0);
+      const firstLayout = activeContent[0].layout || "single";
+      setCurrentLayout(firstLayout);
+      const groupedContent = groupMediaByLayout(activeContent);
+      updateVisibleItems(firstLayout, groupedContent, 0);
+      preloadMedia(activeContent);
+    } else {
+      console.warn(`No active content for ${eventType}, using fallback`);
+      setVisibleItems([fallbackItem]);
+    }
+    setIsLoading(false);
+    console.log(`Processed ${eventType} event:`, activeContent);
+  }, [url, getActiveContent, groupMediaByLayout, updateVisibleItems, preloadMedia]);
+
+  const connectSocket = useCallback(() => {
+    if (socketRef.current) {
+      console.log("Socket already exists, disconnecting previous...");
+      socketRef.current.disconnect();
+    }
+
+    const socket = io(apiBaseUrl, {
+      query: { url },
+      auth: { token: localStorage.getItem('jwt_token') },
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 5000,
+    });
+
+    socket.on('connect', () => {
+      console.log(`Socket.IO connected for URL: ${url}`);
+      if (pollingRef.current) {
+        console.log("Stopping polling due to successful Socket.IO connection");
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+      socket.emit('join', { url, token: localStorage.getItem('jwt_token') }, (response) => {
+        if (response.error) {
+          console.error('Join error:', response.error);
+          setIsLoading(false);
+          setVisibleItems([{ ...fallbackItem, content: response.error }]);
+        }
+      });
+    });
+
+    socket.on('init', (data) => {
+      console.log('Received init data:', data);
+      handleSocketUpdate(data, 'init');
+    });
+
+    socket.on('update', (data) => {
+      console.log('Received update data:', data);
+      handleSocketUpdate(data, 'update');
+    });
+
+    socket.on('delete', (data) => {
+      console.log('Received delete data:', data);
+      if (data.url === url) {
+        // Clear state
+        setIsEnabled(false);
+        setMediaContent([]);
+        setVisibleItems([fallbackItem]);
+        setAllContent([]);
+        setScheduledAt(null);
+        setExpiresAt(null);
+        setCustomTicker(null);
+        setSettings(defaultSettings);
+        setIsLoading(false);
+        
+        // Clear local storage
+        const cacheKey = `preview_${url}`;
+        localStorage.removeItem(cacheKey);
+        console.log(`Cleared local storage for ${cacheKey}`);
+  
+        // Show fallback UI
+        Swal.fire({
+          title: 'URL Deleted',
+          text: 'This URL has been deleted and is no longer available.',
+          icon: 'info',
+          confirmButtonText: 'OK',
+        });
+      }
+    });
+
+    socket.on('error', (error) => {
+      console.error('Socket.IO error:', error.message);
+      setIsLoading(false);
+      setVisibleItems([{ ...fallbackItem, content: error.message }]);
+    });
+
+    socket.on('connect_error', (error) => {
+      console.error('Socket.IO connection error:', error);
+      if (!pollingRef.current) {
+        console.log("Starting polling due to Socket.IO connection error");
+        pollingRef.current = setInterval(() => {
+          fetchData('polling');
+        }, 30 * 1000);
+      }
+    });
+
+    socketRef.current = socket;
+
+    return () => {
+      console.log('Disconnecting Socket.IO');
+      socket.disconnect();
+      if (pollingRef.current) {
+        console.log("Clearing polling interval");
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, [url, handleSocketUpdate, fetchData]);
+
+  useEffect(() => {
+    const handleMouseMove = () => {
+      resetControlTimeout();
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      if (controlTimeoutRef.current) {
+        clearTimeout(controlTimeoutRef.current);
+      }
+    };
+  }, [resetControlTimeout]);
+
   useEffect(() => {
     const loadData = async () => {
       setIsLoading(true);
       try {
-        await Promise.all([fetchData(), fetchWeather(), fetchNews()]);
+        await Promise.all([fetchData('initial'), fetchWeather(), fetchNews()]);
       } catch (error) {
         console.error("Error loading data:", error);
         setVisibleItems([fallbackItem]);
@@ -1775,8 +1788,9 @@ const Preview = () => {
       }
     };
     loadData();
-    // No refreshInterval here; fetchData will be called after each loop completion
-  }, [fetchData, fetchWeather, fetchNews]);
+    const cleanupSocket = connectSocket();
+    return cleanupSocket;
+  }, [fetchData, fetchWeather, fetchNews, connectSocket]);
 
   useEffect(() => {
     getUserLocation();
@@ -1816,10 +1830,7 @@ const Preview = () => {
           setIsEnabled(true);
           setCountdownType(null);
           clearInterval(timerInterval);
-          console.log("Completed one loop, refreshing the page");
-          fetchData();
-          // window.location.reload(); // Refresh the entire page
-          console.log("Completed one loop, refreshing the page");
+          fetchData('schedule-start');
         } else {
           setTimeRemaining(timeUntilStart);
         }
@@ -1835,7 +1846,7 @@ const Preview = () => {
           setIsEnabled(false);
           setCountdownType(null);
           clearInterval(timerInterval);
-          fetchData();
+          fetchData('schedule-end');
         } else {
           setTimeRemaining(timeUntilExpiry);
         }
@@ -1889,23 +1900,12 @@ const Preview = () => {
     const timer = setTimeout(() => {
       const nextIndex = currentIndex + itemsPerPage;
       if (nextIndex >= mediaContent.length) {
-        // Completed one full loop, reset to index 0 and trigger API call
         setCurrentIndex(0);
         const firstLayout = mediaContent[0]?.layout || "single";
         setCurrentLayout(firstLayout);
         updateVisibleItems(firstLayout, groupedContent, 0);
-        console.log("Completed one loop, fetching new data");
-
-        // If URL is "Automate", clear the cache and hard refresh
-        if (url === "Automate") {
-          const cacheKey = `preview_${url}_${Date.now()}`; // Matches the cache key used in fetchData
-          localStorage.removeItem(cacheKey); // Clear the cache
-          window.location.reload(true); // Hard refresh the page
-        } else {
-          fetchData(); // Otherwise, just fetch new data without a hard refresh
-        }
+        console.log("Completed one loop, relying on Socket.IO for updates");
       } else {
-        // Move to next set of items
         setCurrentIndex(nextIndex);
         const nextItem = mediaContent[nextIndex] || fallbackItem;
         const nextLayout = nextItem.layout || "single";
@@ -1925,7 +1925,6 @@ const Preview = () => {
     isEnabled,
     groupMediaByLayout,
     updateVisibleItems,
-    fetchData,
   ]);
 
   return (
@@ -1945,7 +1944,6 @@ const Preview = () => {
           formatTimeRemaining
         )
       ) : mediaContent.length > 0 ? (
-        // <div className={`grid ${getGridClasses()} w-full h-full gap-2 p-2`}>
         <div className={`grid w-full h-screen gap-2 ${getGridClasses()}`}>
           {visibleItems.map((item, index) => (
             <div
@@ -1984,20 +1982,17 @@ const Preview = () => {
         </div>
       )}
 
-      {/* Date & Time Display */}
       <ClockDisplay
         position={settings.dateTime.position}
         visible={settings.dateTime.visible}
       />
 
-      {/* Temperature & AQI Display */}
       <TemperatureDisplay
         weather={weather}
         position={settings.temperature.position}
         visible={settings.temperature.visible}
       />
 
-      {/* Ticker Display */}
       {(customTicker || news.length > 0) && settings.ticker.visible && (
         <div
           className="absolute bottom-16 left-0 w-full overflow-hidden bg-black bg-opacity-70 py-3"
@@ -2011,7 +2006,7 @@ const Preview = () => {
               className="news-ticker"
               style={{
                 animationName: "marquee",
-                animationDuration: `${settings.ticker.speed}s`,
+                animationDuration: `${customTicker ? settings.ticker.speed * 0.5 : settings.ticker.speed}s`, // Make custom ticker 2x faster
                 animationTimingFunction: "linear",
                 animationIterationCount: "infinite",
                 fontSize: `${settings.ticker.fontSize}px`,

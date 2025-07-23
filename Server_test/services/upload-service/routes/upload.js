@@ -13,6 +13,7 @@ const { ipAddress } = require("../../../config/ipAddress");
 const libre = require("libreoffice-convert");
 const { promisify } = require("util");
 const libreConvert = promisify(libre.convert);
+const { getIO } = require('../../../Socket_IO');
 const PDFDocument = require("pdfkit");
 
 const secret_key = "TickerApplication";
@@ -23,6 +24,14 @@ const baseURL = `https://122.179.140.84:4012`;
 
 let userId;
 let username;
+
+// Helper to broadcast updates
+function broadcastUpdate(url, data, eventName = 'update') {
+  const io = getIO();
+  io.to(url).emit(eventName, data);
+  logger.log('info', `Broadcasted ${eventName} to room ${url}`);
+  console.log('info', `Broadcasted ${eventName} to room ${url}`);
+}
 
 function generateRandomCode(length) {
   const chars =
@@ -482,7 +491,7 @@ router.post("/upload", licenseMiddleware, (req, res) => {
         custom_ticker: custom_ticker,
       });
 
-      console.log(newTickerData , " -- newTickerData");
+      broadcastUpdate(uniqueUrl, newTickerData.toJSON(), 'init');
       
       logger.logUserActivity(method, apiName, {
         user_id: userId,
@@ -861,6 +870,8 @@ router.patch("/updateUrlContent", async (req, res) => {
 
       const previewUrl = `${baseURL}/${tickerData.url}`;
 
+      broadcastUpdate(Url_Name, tickerData.toJSON());
+
       logger.logUserActivity(method, apiName, {
         user_id: userId,
         account_id: accountId,
@@ -932,7 +943,7 @@ router.post("/existingUrl", async (req, res) => {
 
 // Delete URL Route
 router.delete("/deleteUrl", async (req, res) => {
-  const token = req.headers.authorization
+  const token = req.headers.authorization;
   if (!token) {
     return res.status(401).json({ message: "Unauthorized: Token is missing" });
   }
@@ -965,6 +976,7 @@ router.delete("/deleteUrl", async (req, res) => {
 
     const urlName = tickerData.Url_Name;
 
+    // Delete associated files
     if (tickerData.url_content && Array.isArray(tickerData.url_content)) {
       logger.log("info", `Deleting ${tickerData.url_content.length} files for URL ID: ${id}`);
       for (const item of tickerData.url_content) {
@@ -986,6 +998,7 @@ router.delete("/deleteUrl", async (req, res) => {
       }
     }
 
+    // Delete folder if empty
     try {
       const folderPath = path.join(process.cwd(), "upload-service/uploads", username, urlName);
       logger.log("info", `Checking if folder exists: ${folderPath}`);
@@ -1016,6 +1029,10 @@ router.delete("/deleteUrl", async (req, res) => {
     }
 
     await tickerData.destroy();
+
+    // Emit delete event with url included
+    broadcastUpdate(urlName, { id, url: urlName }, 'delete');
+    logger.log('info', `Emitted delete event for URL: ${urlName}`);
 
     logger.logUserActivity(method, apiName, {
       user_id: userId,
@@ -1079,14 +1096,22 @@ router.put("/toggleUrlStatus", async (req, res) => {
 
     const [updated] = await db.TickerData.update(updateData, { where: { id } });
 
-  
     if (updated) {
       const updatedUrl = await db.TickerData.findByPk(id);
+      if (!updatedUrl) {
+        return res.status(404).json({ message: "URL not found" });
+      }
+
+      // Emit the full TickerData object with the 'update' event
+      broadcastUpdate(updatedUrl.url, updatedUrl.toJSON(), 'update');
+      logger.log('info', `Emitted update event for URL: ${updatedUrl.url}`);
+
       res.status(200).json(updatedUrl);
     } else {
       res.status(404).json({ message: "URL not found" });
     }
   } catch (error) {
+    logger.log('error', `Error updating status: ${error.message}`);
     res.status(500).json({
       message: "Error updating status",
       error: error.message,
@@ -1238,21 +1263,25 @@ router.post("/saveSettings", async (req, res) => {
       if (settings.ticker.speed < 100 || settings.ticker.speed > 600) {
         return res
           .status(400)
-          .json({ message: "Ticker speed must be between 10 and 60 seconds" });
+          .json({ message: "Ticker speed must be between 100 and 600 milliseconds" });
       }
       if (settings.ticker.height < 50 || settings.ticker.height > 80) {
         return res
           .status(400)
-          .json({ message: "Ticker height must be between 30 and 100 pixels" });
+          .json({ message: "Ticker height must be between 50 and 80 pixels" });
       }
       if (settings.ticker.fontSize < 14 || settings.ticker.fontSize > 26) {
         return res.status(400).json({
-          message: "Ticker font size must be between 12 and 24 pixels",
+          message: "Ticker font size must be between 14 and 26 pixels",
         });
       }
     }
 
     await tickerData.update({ settings });
+
+    // Emit update event with full TickerData
+    broadcastUpdate(tickerData.url, tickerData.toJSON(), 'update');
+    logger.log('info', `Emitted update event for URL: ${tickerData.url} with updated settings`);
 
     logger.logUserActivity(req.method, req.originalUrl, {
       user_id: userId,
