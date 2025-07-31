@@ -1056,6 +1056,7 @@ const Preview = () => {
   const [allContent, setAllContent] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(defaultSettings);
+  const [isSessionActive, setIsSessionActive] = useState(true); // NEW: Persistent flag to prevent reconnection after replacement
   const controlTimeoutRef = useRef(null);
   const socketRef = useRef(null);
   const pollingRef = useRef(null);
@@ -1664,31 +1665,53 @@ const Preview = () => {
   }, [url, getActiveContent, groupMediaByLayout, updateVisibleItems, preloadMedia]);
 
   const connectSocket = useCallback(() => {
+    if (!isSessionActive) {
+      console.log('Session is inactive (replaced), skipping connection attempt');
+      return; // NEW: Block any further connection attempts
+    }
+
+    // Disconnect existing socket properly
     if (socketRef.current) {
       console.log("Socket already exists, disconnecting previous...");
+      socketRef.current.isBeingReplaced = false; // Reset replacement flag
+      socketRef.current.removeAllListeners(); // Remove all listeners first
       socketRef.current.disconnect();
+      socketRef.current = null;
     }
 
     const socket = io(apiBaseUrl, {
       query: { url },
       auth: { token: localStorage.getItem('jwt_token') },
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 5000,
+      reconnection: false, // CHANGED: Disable auto-reconnection to prevent loops; handle manually if needed
+      reconnectionAttempts: 0, // NEW: No attempts
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+      forceNew: true, // Force a new connection
     });
 
+    // Initialize flags
+    socket.isBeingReplaced = false;
+    socket.replacementAlertShown = false;
+
     socket.on('connect', () => {
-      console.log(`Socket.IO connected for URL: ${url}`);
+      console.log(`Socket.IO connected for URL: ${url}, Socket ID: ${socket.id}`);
+
+      // Stop polling if it's running
       if (pollingRef.current) {
         console.log("Stopping polling due to successful Socket.IO connection");
         clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
+
+      // Join the room
       socket.emit('join', { url, token: localStorage.getItem('jwt_token') }, (response) => {
-        if (response.error) {
+        if (response?.error) {
           console.error('Join error:', response.error);
           setIsLoading(false);
           setVisibleItems([{ ...fallbackItem, content: response.error }]);
+        } else {
+          console.log('Successfully joined room:', response);
         }
       });
     });
@@ -1706,23 +1729,10 @@ const Preview = () => {
     socket.on('delete', (data) => {
       console.log('Received delete data:', data);
       if (data.url === url) {
-        // Clear state
-        setIsEnabled(false);
-        setMediaContent([]);
-        setVisibleItems([fallbackItem]);
-        setAllContent([]);
-        setScheduledAt(null);
-        setExpiresAt(null);
-        setCustomTicker(null);
-        setSettings(defaultSettings);
-        setIsLoading(false);
-        
-        // Clear local storage
-        const cacheKey = `preview_${url}`;
-        localStorage.removeItem(cacheKey);
-        console.log(`Cleared local storage for ${cacheKey}`);
-  
-        // Show fallback UI
+        // Clear all state
+        resetToFallbackState();
+
+        // Show notification
         Swal.fire({
           title: 'URL Deleted',
           text: 'This URL has been deleted and is no longer available.',
@@ -1732,14 +1742,64 @@ const Preview = () => {
       }
     });
 
+    socket.on('session_replaced', (data) => {
+      console.log('Session replaced:', data);
+
+      // Prevent reconnection loops by marking this socket as replaced
+      socket.isBeingReplaced = true;
+
+      // Clear all state immediately
+      resetToFallbackState();
+
+      // NEW: Mark session as inactive to block future connectSocket calls
+      setIsSessionActive(false);
+
+      // Show notification only once
+      if (!socket.replacementAlertShown) {
+        socket.replacementAlertShown = true;
+
+        Swal.fire({
+          title: 'Session Replaced',
+          text: data.message || 'This URL is now being accessed on another device. Your session has been closed.',
+          icon: 'warning',
+          confirmButtonText: 'OK',
+          allowOutsideClick: false,
+          showConfirmButton: true,
+          timer: undefined, // Remove any auto-close timer
+        }).then(() => {
+          // Clean disconnect without triggering reconnection
+          if (socket.connected) {
+            socket.removeAllListeners();
+            socket.disconnect();
+          }
+
+          // Clear polling to prevent any restart attempts
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+
+          console.log('Session replacement handled; no further connections allowed');
+        });
+      }
+    });
+
     socket.on('error', (error) => {
-      console.error('Socket.IO error:', error.message);
+      console.error('Socket.IO error:', error.message || error);
       setIsLoading(false);
-      setVisibleItems([{ ...fallbackItem, content: error.message }]);
+      setVisibleItems([{ ...fallbackItem, content: error.message || 'Connection error occurred' }]);
     });
 
     socket.on('connect_error', (error) => {
-      console.error('Socket.IO connection error:', error);
+      console.error('Socket.IO connection error:', error.message);
+
+      // Don't start polling if this socket was replaced
+      if (socket.isBeingReplaced || !isSessionActive) { // UPDATED: Check persistent flag
+        console.log('Socket was replaced or inactive, not starting polling on connect_error');
+        return;
+      }
+
+      // Start polling as fallback if not already running
       if (!pollingRef.current) {
         console.log("Starting polling due to Socket.IO connection error");
         pollingRef.current = setInterval(() => {
@@ -1748,18 +1808,59 @@ const Preview = () => {
       }
     });
 
+    socket.on('disconnect', (reason) => {
+      console.log('Socket.IO disconnected:', reason);
+
+      // Don't start polling if this socket was replaced or inactive
+      if (socket.isBeingReplaced || !isSessionActive) { // UPDATED: Check persistent flag
+        console.log('Socket was replaced or inactive, not starting polling');
+        return;
+      }
+
+      // Start polling if disconnected unexpectedly (not manual)
+      if (reason !== 'io client disconnect' && reason !== 'client namespace disconnect' && !pollingRef.current) {
+        console.log("Starting polling due to unexpected disconnect");
+        pollingRef.current = setInterval(() => {
+          fetchData('polling');
+        }, 30 * 1000);
+      }
+    });
+
     socketRef.current = socket;
 
+    // Cleanup function
     return () => {
-      console.log('Disconnecting Socket.IO');
-      socket.disconnect();
+      console.log('Cleaning up Socket.IO connection');
+      if (socket) {
+        socket.removeAllListeners();
+        socket.disconnect();
+      }
       if (pollingRef.current) {
         console.log("Clearing polling interval");
         clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
     };
-  }, [url, handleSocketUpdate, fetchData]);
+  }, [url, handleSocketUpdate, fetchData, isSessionActive]); // UPDATED: Add isSessionActive to dependencies
+
+  // Helper function to reset state (unchanged)
+  function resetToFallbackState() {
+    setIsEnabled(false);
+    setMediaContent([]);
+    setVisibleItems([fallbackItem]);
+    setAllContent([]);
+    setScheduledAt(null);
+    setExpiresAt(null);
+    setCustomTicker(null);
+    setSettings(defaultSettings);
+    setIsLoading(false);
+
+    // Clear local storage
+    const cacheKey = `preview_${url}`;
+    localStorage.removeItem(cacheKey);
+    console.log(`Cleared local storage for ${cacheKey}`);
+  }
+
 
   useEffect(() => {
     const handleMouseMove = () => {
