@@ -56,7 +56,8 @@ router.post('/register', async (req, res) => {
     const user = await db.User.create({ 
       username, 
       password: hashedPassword, 
-      accountId: account.id 
+      accountId: account.id,
+      isAdmin: false // Explicitly set isAdmin to false for new users
     });
 
     // Update account's createdBy if it's a new account
@@ -88,7 +89,8 @@ router.post('/login', async (req, res) => {
 
     const user = await db.User.findOne({ 
       where: { username },
-      include: [{ model: db.Account, attributes: ['id', 'accountName'] }]
+      include: [{ model: db.Account, attributes: ['id', 'accountName'] }],
+      attributes: ['id', 'username', 'password', 'accountId', 'isAdmin']
     });
     
     if (!user) {
@@ -103,7 +105,8 @@ router.post('/login', async (req, res) => {
     const token = jwt.sign({ 
       userId: user.id, 
       username: user.username, 
-      accountId: user.accountId 
+      accountId: user.accountId,
+      isAdmin: user.isAdmin
     }, SECRET_KEY, { expiresIn: '1d' });
 
     req.session.userId = user.id;
@@ -114,11 +117,12 @@ router.post('/login', async (req, res) => {
       message: `User ${username} logged in under account ${user.Account.accountName}` 
     });
     res.status(200).json({ 
-      message: 'Login successful', 
+      message: user.isAdmin ? 'Admin login successful' : 'User login successful', 
       token, 
       userId: user.id, 
       accountId: user.accountId,
-      accountName: user.Account.accountName 
+      accountName: user.Account.accountName,
+      isAdmin: user.isAdmin
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -142,7 +146,8 @@ const authenticate = async (req, res, next) => {
     const decoded = jwt.verify(token, SECRET_KEY);
     const user = await db.User.findOne({ 
       where: { id: decoded.userId },
-      include: [{ model: db.Account, attributes: ['id', 'accountName'] }]
+      include: [{ model: db.Account, attributes: ['id', 'accountName'] }],
+      attributes: ['id', 'username', 'accountId', 'isAdmin']
     });
 
     if (!user) {
@@ -175,7 +180,6 @@ router.get('/validuser', async (req, res) => {
   }
 });
 
-
 // Token Verification Route
 router.post('/verify-token', async (req, res) => {
   const { token } = req.body;
@@ -188,7 +192,8 @@ router.post('/verify-token', async (req, res) => {
     const decoded = jwt.verify(token, SECRET_KEY);
     const user = await db.User.findOne({ 
       where: { id: decoded.userId },
-      include: [{ model: db.Account, attributes: ['id', 'accountName'] }]
+      include: [{ model: db.Account, attributes: ['id', 'accountName'] }],
+      attributes: ['id', 'username', 'isAdmin']
     });
 
     if (!user) {
@@ -196,7 +201,7 @@ router.post('/verify-token', async (req, res) => {
     }
 
     res.status(200).json({ 
-      user: { id: user.id, username: user.username }, 
+      user: { id: user.id, username: user.username, isAdmin: user.isAdmin }, 
       account: { id: user.Account.id, accountName: user.Account.accountName } 
     });
   } catch (err) {
