@@ -61,7 +61,7 @@ const wss = new WebSocket.Server({ server }); // Initialize WebSocket server
 
 // CORS configuration
 const allowedOrigins = [
-    `http://122.179.140.84:4012`,
+    `http://192.168.1.21`,
     `https://122.179.140.84:4012`,
     `http://122.179.140.84:86`,
     `http://192.168.1.27:86`,
