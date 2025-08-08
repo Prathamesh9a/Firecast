@@ -4,8 +4,6 @@ const logger = require('./Utility/logger');
 let io = null;
 
 const allowedOrigins = [
-  `http://192.168.1.21`,
-  `http://192.168.1.17:3000`,
   `http://122.179.140.84:4012`,
   `http://122.179.140.84:86`,
   `http://${require('./config/ipAddress').ipAddress}:3000`,

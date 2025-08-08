@@ -165,7 +165,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import logo_gen from '../assets/Firecast logo latest.png';
+import logo_gen from '../assets/logo_GEN.png';
 import ArrowLine from '../assets/arrow-line.png';
 import ArrowHead from '../assets/arrow-head.png';
 import Background from '../assets/BgHome1.png';
