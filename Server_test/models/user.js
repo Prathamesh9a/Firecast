@@ -21,11 +21,6 @@ module.exports = (sequelize, DataTypes) => {
         key: 'id',
       },
     },
-    isAdmin: {
-      type: DataTypes.BOOLEAN,
-      allowNull: false,
-      defaultValue: false,
-    },
   });
 
   return User;

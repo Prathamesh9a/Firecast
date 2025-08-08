@@ -135,7 +135,7 @@ process.on('unhandledRejection', (reason) => {
 
 // D:\Firecast USA\Firecast\Server_test\upload-service\uploads\stifflera@welspunusa.com\test121\SampleJPGImage_1mbmb.jpg
 // Start HTTP server (or HTTPS if needed)
-const PORT = 4082;
+const PORT = 4081;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`API Gateway running on http://${ipAddress}:${PORT}`);
 });
