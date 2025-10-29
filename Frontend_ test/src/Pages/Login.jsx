@@ -170,6 +170,8 @@ import ArrowLine from '../assets/arrow-line.png';
 import ArrowHead from '../assets/arrow-head.png';
 import Background from '../assets/BgHome1.png';
 import { AiFillEye, AiFillEyeInvisible } from 'react-icons/ai';
+import { jwtDecode } from 'jwt-decode';
+import Swal from 'sweetalert2';
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -187,11 +189,37 @@ const Login = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setErrorMessage('');
-
+  
     try {
       const response = await axios.post(`${apiBaseUrl}/api/auth/login`, { username, password });
-      localStorage.setItem('token', response.data.token);
+  
+      const token = response.data.token;
+      localStorage.setItem('token', token);
       sessionStorage.setItem("userInfo", response.data.userId);
+  
+      const decoded = jwtDecode(token);      const currentTime = Date.now();
+      const expiryTime = decoded.exp * 1000; // convert to ms
+  
+      const timeUntilExpiry = expiryTime - currentTime;
+  
+      // TEMPORARY override for testing:
+      // const timeUntilExpiry = 10000; // 10 seconds
+      // console.log(`Token will expire in ${timeUntilExpiry / 1000} seconds`);
+      
+      // Set timeout to logout user automatically when token expires
+      setTimeout(() => {
+        localStorage.removeItem('token');
+        sessionStorage.clear();
+        Swal.fire({
+          title: 'Session Expired',
+          text: 'Your session has expired. Please log in again.',
+          icon: 'warning',
+          confirmButtonText: 'OK'
+        }).then(() => {
+          window.location.href = '/login';
+        });
+      }, timeUntilExpiry);
+  
       navigate('/editUrl');
     } catch (error) {
       if (error.message === 'Network Error') {
@@ -203,6 +231,7 @@ const Login = () => {
       }
     }
   };
+  
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-cover bg-center p-4 sm:p-6 md:p-8 lg:p-10"

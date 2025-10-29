@@ -1071,7 +1071,10 @@ router.post("/saveSettings", async (req, res) => {
       });
     }
     const tickerData = await db.TickerData.findOne({
-      where: { id, user_id: userId },
+      where: {
+        id,
+        // user_id: userId
+      },
     });
     if (!tickerData) {
       return res
@@ -1157,7 +1160,10 @@ router.get("/getSettings/:id", async (req, res) => {
       return res.status(401).json({ message: "Unauthorized: Invalid token" });
     }
     const tickerData = await db.TickerData.findOne({
-      where: { id, user_id: userId },
+      where: {
+        id,
+        // user_id: userId
+      },
     });
     if (!tickerData) {
       return res
