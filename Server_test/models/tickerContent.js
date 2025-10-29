@@ -44,7 +44,7 @@ module.exports = (sequelize, DataTypes) => {
           height: 50,
           fontSize: 16,
           visible: true,
-          rssFeed: ["ndtv"], // Default RSS feed
+          rssFeed: ["nbc"], // Default RSS feed
         },
         dateTime: {
           position: "top-right",

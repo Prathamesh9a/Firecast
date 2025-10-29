@@ -857,7 +857,7 @@ const Home1 = () => {
                 className="font-bold text-gray-700"
                 style={{ fontFamily: 'Outfit', fontSize: '32px', lineHeight: '40.32px', color: '#FF9F00' }}
               >
-                Create New Screen
+                Create New Screen's
               </h2>
             </div>
             <p className="" style={{ color: '#6F7C8E', fontFamily: 'Outfit', fontSize: '20px', lineHeight: '25.2px' }}>

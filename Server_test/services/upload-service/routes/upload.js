@@ -20,7 +20,8 @@ const { v4: uuidv4 } = require('uuid');
 const secret_key = "TickerApplication";
 const encryptedLimit = "e7ZLZFFrXSiP/1U2FOvj4w==";
 const secretUrlKey = "9ATicker";
-const baseURL = `http://192.168.1.27:3000`;
+const baseURL = `https://122.179.140.84:4012`;
+// const baseURL = `http://192.168.1.27:3000`;
 let userId;
 let username;
 // Helper to broadcast updates

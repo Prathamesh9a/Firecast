@@ -355,61 +355,102 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
       showSummary
     )
       return;
-
-    console.log(`Starting auto-scroll for ${fileType}, time: ${time}s, isPaused: ${isPaused}`);
-    
+  
     const container = containerRef.current;
     let isScrolling = true;
-    let scrollInterval;
-
+    let scrollInterval = null;
+    let hasStarted = false;
+  
     const startScrolling = () => {
-      if (!isScrolling || !container) return;
-
-      // Wait a bit for the PDF to render completely
-      setTimeout(() => {
-        const totalScrollHeight = container.scrollHeight;
-        const containerHeight = container.clientHeight;
-        const scrollableHeight = totalScrollHeight - containerHeight;
-        
-        if (scrollableHeight <= 0) {
-          console.log("No scrollable content");
-          return;
-        }
-
-        const scrollSpeed = calculateScrollSpeed(scrollableHeight, time);
-        console.log(`Scroll parameters: total=${totalScrollHeight}, container=${containerHeight}, scrollable=${scrollableHeight}, speed=${scrollSpeed}px/interval`);
-
-        scrollInterval = setInterval(() => {
-          if (!container || !isScrolling) return;
-
-          const currentScrollTop = container.scrollTop;
-          const maxScrollTop = scrollableHeight;
-          
-          if (currentScrollTop >= maxScrollTop - 5) {
-            // Reached bottom, reset to top
-            console.log("Reached bottom, resetting to top");
-            container.scrollTo({ top: 0, behavior: "smooth" });
-          } else {
-            // Scroll by calculated amount
-            const newScrollTop = Math.min(currentScrollTop + scrollSpeed, maxScrollTop);
-            container.scrollTo({ top: newScrollTop, behavior: "auto" });
-          }
-        }, 50); // 50ms interval
-      }, 1000); // Wait 1 second for PDF to render
-    };
-
-    startScrolling();
-
-    return () => {
-      console.log("Cleaning up scroll interval");
-      isScrolling = false;
-      if (scrollInterval) {
-        clearInterval(scrollInterval);
+      if (hasStarted || !isScrolling) return;
+      hasStarted = true;
+  
+      const totalScrollHeight = container.scrollHeight;
+      const containerHeight = container.clientHeight;
+      const scrollableHeight = totalScrollHeight - containerHeight;
+  
+      if (scrollableHeight <= 50) {
+        console.log("Not enough content to scroll");
+        return;
       }
+  
+      const scrollSpeed = calculateScrollSpeed(scrollableHeight, time);
+  
+      console.log(
+        `Starting PDF scroll: ${scrollableHeight}px over ${time}s → ${scrollSpeed}px/50ms`
+      );
+  
+      scrollInterval = setInterval(() => {
+        if (!isScrolling || !container) return;
+  
+        const current = container.scrollTop;
+        const max = scrollableHeight;
+  
+        if (current >= max - 10) {
+          container.scrollTo({ top: 0, behavior: "smooth" });
+        } else {
+          container.scrollTo({
+            top: Math.min(current + scrollSpeed, max),
+            behavior: "auto",
+          });
+        }
+      }, 50);
     };
-  }, [fileType, inView, isPaused, showSummary, time, calculateScrollSpeed]);
-
-
+  
+    // === Observer: Wait for scrollHeight to stabilize ===
+    let lastHeight = 0;
+    let stableCount = 0;
+    const STABLE_THRESHOLD = 3; // Wait for 3 consecutive same height
+    const CHECK_INTERVAL = 500; // Check every 500ms
+  
+    const heightObserver = setInterval(() => {
+      if (!containerRef.current || !isScrolling) {
+        clearInterval(heightObserver);
+        return;
+      }
+  
+      const currentHeight = containerRef.current.scrollHeight;
+  
+      if (currentHeight === lastHeight) {
+        stableCount++;
+      } else {
+        stableCount = 0;
+        lastHeight = currentHeight;
+      }
+  
+      if (stableCount >= STABLE_THRESHOLD && currentHeight > containerHeight) {
+        clearInterval(heightObserver);
+        console.log(`PDF fully rendered. Height stable at ${currentHeight}px`);
+        startScrolling();
+      }
+    }, CHECK_INTERVAL);
+  
+    // Fallback: Start after max 15 seconds even if not stable
+    const maxWait = setTimeout(() => {
+      if (!hasStarted && containerRef.current) {
+        clearInterval(heightObserver);
+        console.warn("PDF render timeout. Forcing scroll start.");
+        startScrolling();
+      }
+    }, 15000);
+  
+    return () => {
+      isScrolling = false;
+      hasStarted = true;
+      clearInterval(scrollInterval);
+      clearInterval(heightObserver);
+      clearTimeout(maxWait);
+    };
+  }, [
+    fileType,
+    inView,
+    isPaused,
+    showSummary,
+    time,
+    calculateScrollSpeed,
+    pages.length, // ← Add this!
+  ]);
+  
       // Update container dimensions when content changes
       useEffect(() => {
         if (containerRef.current && pages.length > 0) {
@@ -1704,7 +1745,7 @@ const Preview = () => {
       // Ensure rssFeed is an array
       const rssFeedValues = Array.isArray(settings.ticker.rssFeed)
         ? settings.ticker.rssFeed
-        : [settings.ticker.rssFeed || "ndtv"];
+        : [settings.ticker.rssFeed || "nbc"];
       
       const feedUrls = rssFeedValues
         .map((value) => {
@@ -2319,33 +2360,90 @@ const Preview = () => {
     getUserLocation();
   }, [getUserLocation]);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (allContent.length > 0) {
-        const newActiveContent = getActiveContent(allContent);
-        if (JSON.stringify(newActiveContent) !== JSON.stringify(mediaContent)) {
-          setMediaContent(newActiveContent);
-          setCurrentIndex(0);
-          if (newActiveContent.length > 0) {
-            const firstLayout = newActiveContent[0].layout || "single";
-            setCurrentLayout(firstLayout);
-            const groupedContent = groupMediaByLayout(newActiveContent);
-            updateVisibleItems(firstLayout, groupedContent, 0);
-          } else {
-            console.warn("No new active content, using fallback");
-            setVisibleItems([fallbackItem]);
-          }
-        }
+// Replace the slideshow useEffect in Preview component
+
+useEffect(() => {
+  if (mediaContent.length === 0 || !isEnabled || isPaused) {
+    setActiveSlideshow(false);
+    if (mediaContent.length === 0 || !isEnabled) {
+      setVisibleItems([fallbackItem]);
+    }
+    return;
+  }
+
+  setActiveSlideshow(true);
+  const currentItemIndex = currentIndex % mediaContent.length;
+  const currentItem = mediaContent[currentItemIndex] || fallbackItem;
+  
+  if (
+    !currentItem ||
+    !Number.isFinite(currentItem.time) ||
+    currentItem.time <= 0
+  ) {
+    console.warn("Invalid current item or time, using fallback", {
+      currentIndex,
+      item: currentItem,
+    });
+    setVisibleItems([fallbackItem]);
+    return;
+  }
+
+  const currentLayout = currentItem.layout || "single";
+  setCurrentLayout(currentLayout);
+  const layoutConfig =
+    layoutOptions.find((option) => option.id === currentLayout) ||
+    layoutOptions[0];
+  const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+  const groupedContent = groupMediaByLayout(mediaContent);
+  updateVisibleItems(currentLayout, groupedContent, currentIndex);
+
+  // NEW: Check if current item is a PDF
+  const isPdfContent = currentItem.content?.endsWith('.pdf');
+  
+  // NEW: For single PDF in single layout, don't set timer to avoid restart
+  if (isPdfContent && mediaContent.length === 1 && currentLayout === 'single') {
+    console.log('Single PDF detected - continuous scroll mode, no slideshow timer');
+    return; // Don't set any timer, let PDF scroll infinitely
+  }
+
+  const delay = currentItem.time * 1000;
+
+  const timer = setTimeout(() => {
+    const nextIndex = currentIndex + itemsPerPage;
+    
+    // NEW: If we're looping back to the same single item, don't trigger re-render
+    if (nextIndex >= mediaContent.length) {
+      if (mediaContent.length === 1 && currentIndex === 0) {
+        console.log('Already showing single item, skipping index update');
+        return; // Don't update state if we're already showing the only item
       }
-    }, 60000);
-    return () => clearInterval(timer);
-  }, [
-    allContent,
-    mediaContent,
-    getActiveContent,
-    groupMediaByLayout,
-    updateVisibleItems,
-  ]);
+      
+      setCurrentIndex(0);
+      const firstLayout = mediaContent[0]?.layout || "single";
+      setCurrentLayout(firstLayout);
+      updateVisibleItems(firstLayout, groupedContent, 0);
+      console.log("Completed one loop, relying on Socket.IO for updates");
+    } else {
+      setCurrentIndex(nextIndex);
+      const nextItem = mediaContent[nextIndex] || fallbackItem;
+      const nextLayout = nextItem.layout || "single";
+      setCurrentLayout(nextLayout);
+      updateVisibleItems(nextLayout, groupedContent, nextIndex);
+    }
+  }, delay);
+
+  return () => {
+    console.log("Clearing slideshow timer");
+    clearTimeout(timer);
+  };
+}, [
+  mediaContent,
+  currentIndex,
+  isPaused,
+  isEnabled,
+  groupMediaByLayout,
+  updateVisibleItems,
+]);
 
   useEffect(() => {
     const now = new Date();

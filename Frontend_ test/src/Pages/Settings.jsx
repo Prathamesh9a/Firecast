@@ -32,7 +32,7 @@ const defaultSettings = {
     height: 50,
     fontSize: 16,
     visible: true,
-    rssFeed: "ndtv", // Default RSS feed provider
+    rssFeed: "nbc", // Default RSS feed provider
   },
   dateTime: {
     position: "top-right",
