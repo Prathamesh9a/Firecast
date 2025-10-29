@@ -22,6 +22,9 @@ import { v4 as uuidv4 } from 'uuid';
 import './home.css';
 import { useDispatch } from 'react-redux';
 import { setMediaItems, addMediaItem } from '../redux/mediaSlice';
+import * as pdfjsLib from "pdfjs-dist";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.js";
 
 function Home() {
   const dispatch = useDispatch();
@@ -207,35 +210,6 @@ const Home1 = () => {
 
   const scrollableContainerRef = useRef(null);
 
-
-  // const addNewGroup = () => {
-  //   setGroups([...groups, {
-  //     id: uuidv4(),
-  //     layout: 'single',
-  //     time: '',
-  //     schedule: {
-  //       startTime: '',
-  //       endTime: '',
-  //       startDate: '',
-  //       endDate: '',
-  //       frequency: 'none',
-  //       repeatInterval: 1,
-  //       repeatUntil: '',
-  //       weeklyDays: [],
-  //       monthlyRule: '',
-  //       displayMode: 'exclusive',
-  //       priority: 'medium',
-  //       timeWindows: [{ startTime: '', endTime: '' }]
-  //     },
-  //     items: [{
-  //       link: '',
-  //       file: null,
-  //       analyzeWithAI: false,
-  //     }],
-  //   }]);
-  // };
-
-
   const addNewGroup = () => {
     setGroups(prevGroups => {
       const newGroups = [...prevGroups, {
@@ -266,7 +240,6 @@ const Home1 = () => {
     });
   };
 
-
   useEffect(() => {
     if (scrollableContainerRef.current) {
       scrollableContainerRef.current.scrollTop = scrollableContainerRef.current.scrollHeight;
@@ -295,15 +268,113 @@ const Home1 = () => {
     setGroups(newGroups);
   };
 
+  const calculatePdfTime = async (file, groupId, itemIndex) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const pdf = await pdfjsLib.getDocument(url).promise;
+      const numPages = pdf.numPages;
+      let totalHeight = 0;
+
+      const group = groups.find(g => g.id === groupId);
+      const layoutConfig = layoutOptions.find(option => option.id === group.layout) || { cols: 1, rows: 1 };
+      const cols = layoutConfig.cols;
+      const rows = layoutConfig.rows;
+
+      // Approximate container dimensions (80% to account for paddings/margins)
+      const containerWidth = (window.innerWidth * 0.8) / cols;
+      const containerHeight = (window.innerHeight * 0.8) / rows;
+
+      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum);
+        const viewport = page.getViewport({ scale: 1.0 });
+        const scale = containerWidth / viewport.width;
+        const pageHeight = viewport.height * scale;
+        totalHeight += pageHeight;
+        if (pageNum < numPages) totalHeight += 16; // mb-4
+      }
+
+      const scrollableHeight = Math.max(0, totalHeight - containerHeight);
+      const scrollTime = scrollableHeight * 0.05; // 50ms per pixel
+      const buffer = numPages * 2; // 2s per page extra
+      const time = Math.ceil(scrollTime + buffer);
+
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: time > 0 ? time : 10 } : g // min 10s
+      ));
+    } catch (error) {
+      console.error('Error calculating PDF time:', error);
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
+      ));
+    }
+  };
+
+  const calculateDocTime = async (file, groupId, itemIndex) => {
+    try {
+      // Estimate word count based on file size (heuristic: ~250 words per 25KB for doc/docx)
+      const fileSizeKB = file.size / 1024;
+      const estimatedWords = Math.round(fileSizeKB * 10); // 10 words per KB
+      const wordsPerSecond = 3; // Average reading speed: 180 words per minute
+      const readingTimeSeconds = Math.ceil(estimatedWords / wordsPerSecond);
+
+      // Add buffer time for layout considerations
+      const group = groups.find(g => g.id === groupId);
+      const layoutConfig = layoutOptions.find(option => option.id === group.layout) || { cols: 1, rows: 1 };
+      const cols = layoutConfig.cols;
+      const rows = layoutConfig.rows;
+
+      // Adjust time based on layout (more items may reduce time per item)
+      const layoutAdjustment = 1 / (cols * rows);
+      const adjustedTime = Math.max(10, Math.ceil(readingTimeSeconds * layoutAdjustment));
+
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: adjustedTime } : g
+      ));
+    } catch (error) {
+      console.error('Error calculating DOC/DOCX time:', error);
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
+      ));
+    }
+  };
+
+  const calculateTxtTime = async (file, groupId, itemIndex) => {
+    try {
+      const text = await file.text();
+      const words = text.split(/\s+/).filter(word => word.length > 0).length;
+      const wordsPerSecond = 3; // Average reading speed: 180 words per minute
+      const readingTimeSeconds = Math.ceil(words / wordsPerSecond);
+
+      // Add buffer time for layout considerations
+      const group = groups.find(g => g.id === groupId);
+      const layoutConfig = layoutOptions.find(option => option.id === group.layout) || { cols: 1, rows: 1 };
+      const cols = layoutConfig.cols;
+      const rows = layoutConfig.rows;
+
+      // Adjust time based on layout
+      const layoutAdjustment = 1 / (cols * rows);
+      const adjustedTime = Math.max(10, Math.ceil(readingTimeSeconds * layoutAdjustment));
+
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: adjustedTime } : g
+      ));
+    } catch (error) {
+      console.error('Error calculating TXT time:', error);
+      setGroups(prevGroups => prevGroups.map(g => 
+        g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
+      ));
+    }
+  };
+
   const handleInputChange = (groupId, itemIndex, event) => {
     const selectedFiles = Array.from(event.target.files);
     const file = selectedFiles[0];
     if (!file) {
-      console.log('No file selected'); // CHANGE: Added debug log
+      console.log('No file selected');
       return;
     }
 
-    console.log('File:', { // CHANGE: Added debug log for file details
+    console.log('File:', {
       name: file.name,
       type: file.type,
       size: file.size,
@@ -312,14 +383,12 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/x-matroska",
-      "video/mpeg", // CHANGE: Added video/mpeg for broader MP4 support
+      "video/mp4", "video/x-matroska", "video/mpeg",
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      "text/plain" // CHANGE: Added text/plain for .txt files
+      "text/plain"
     ];
-
 
     const allowedExtensions = [
       "mp4", "webm", "ogg", "mov", "avi", "mkv",
@@ -334,7 +403,7 @@ const Home1 = () => {
     const isValidSize = file.size <= maxFileSize;
 
     if (!isValidMime) {
-      Swal.fire({ // CHANGE: Replaced alert with Swal for better UX
+      Swal.fire({
         title: 'Error',
         text: `Unsupported file type: ${file.type}`,
         icon: 'error',
@@ -362,7 +431,7 @@ const Home1 = () => {
     }
 
     const url = URL.createObjectURL(file);
-    setGroups(prevGroups => { // CHANGE: Used functional update for state
+    setGroups(prevGroups => {
       const updatedGroups = prevGroups.map(group => {
         if (group.id === groupId) {
           const newItems = [...group.items];
@@ -371,25 +440,33 @@ const Home1 = () => {
             link: url,
             file: file,
           };
-          if (file.type.startsWith("video/")) {
-            const video = document.createElement("video");
-            video.src = url;
-            video.onloadedmetadata = () => {
-              const durationInSeconds = Math.floor(video.duration);
-              setGroups(groups =>
-                groups.map(g =>
-                  g.id === groupId ? { ...g, time: durationInSeconds } : g
-                )
-              );
-            };
-          }
           return { ...group, items: newItems };
         }
         return group;
       });
-      console.log('Updated groups:', updatedGroups); // CHANGE: Added debug log for state
+      console.log('Updated groups:', updatedGroups);
       return updatedGroups;
     });
+
+    if (file.type.startsWith("video/")) {
+      const video = document.createElement("video");
+      video.src = url;
+      video.onloadedmetadata = () => {
+        const durationInSeconds = Math.floor(video.duration);
+        setGroups(groups =>
+          groups.map(g =>
+            g.id === groupId ? { ...g, time: durationInSeconds } : g
+          )
+        );
+      };
+    } else if (file.type === "application/pdf") {
+      calculatePdfTime(file, groupId, itemIndex);
+    } else if (file.type === "application/msword" || 
+               file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      calculateDocTime(file, groupId, itemIndex);
+    } else if (file.type === "text/plain") {
+      calculateTxtTime(file, groupId, itemIndex);
+    }
 
     event.target.value = null;
   };
@@ -406,11 +483,11 @@ const Home1 = () => {
   const handleFileDrop = (groupId, itemIndex, droppedFiles) => {
     const file = droppedFiles[0];
     if (!file) {
-      console.log('No file dropped'); // CHANGE: Added debug log
+      console.log('No file dropped');
       return;
     }
 
-    console.log('Dropped file:', { // CHANGE: Added debug log for file details
+    console.log('Dropped file:', {
       name: file.name,
       type: file.type,
       size: file.size,
@@ -419,8 +496,7 @@ const Home1 = () => {
 
     const allowedMimeTypes = [
       "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-      "video/mp4", "video/x-matroska",
-      "video/mpeg", // CHANGE: Added video/mpeg
+      "video/mp4", "video/x-matroska", "video/mpeg",
       "application/pdf", "application/vnd.ms-powerpoint",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -440,7 +516,7 @@ const Home1 = () => {
     const isValidSize = file.size <= maxFileSize;
 
     if (!isValidMime) {
-      Swal.fire({ // CHANGE: Replaced alert with Swal
+      Swal.fire({
         title: 'Error',
         text: `Unsupported file type: ${file.type}`,
         icon: 'error',
@@ -468,7 +544,7 @@ const Home1 = () => {
     }
 
     const url = URL.createObjectURL(file);
-    setGroups(prevGroups => { // CHANGE: Used functional update
+    setGroups(prevGroups => {
       const updatedGroups = prevGroups.map(group => {
         if (group.id === groupId) {
           const newItems = [...group.items];
@@ -477,25 +553,33 @@ const Home1 = () => {
             link: url,
             file: file,
           };
-          if (file.type.startsWith("video/")) {
-            const video = document.createElement("video");
-            video.src = url;
-            video.onloadedmetadata = () => {
-              const durationInSeconds = Math.floor(video.duration);
-              setGroups(groups =>
-                groups.map(g =>
-                  g.id === groupId ? { ...g, time: durationInSeconds } : g
-                )
-              );
-            };
-          }
           return { ...group, items: newItems };
         }
         return group;
       });
-      console.log('Updated groups (drop):', updatedGroups); // CHANGE: Added debug log
+      console.log('Updated groups (drop):', updatedGroups);
       return updatedGroups;
     });
+
+    if (file.type.startsWith("video/")) {
+      const video = document.createElement("video");
+      video.src = url;
+      video.onloadedmetadata = () => {
+        const durationInSeconds = Math.floor(video.duration);
+        setGroups(groups =>
+          groups.map(g =>
+            g.id === groupId ? { ...g, time: durationInSeconds } : g
+          )
+        );
+      };
+    } else if (file.type === "application/pdf") {
+      calculatePdfTime(file, groupId, itemIndex);
+    } else if (file.type === "application/msword" || 
+               file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+      calculateDocTime(file, groupId, itemIndex);
+    } else if (file.type === "text/plain") {
+      calculateTxtTime(file, groupId, itemIndex);
+    }
   };
 
   const handleCreateUrl = async () => {
@@ -527,7 +611,7 @@ const Home1 = () => {
 
     for (const [index, linkItem] of links.entries()) {
       if (!linkItem.link && !linkItem.file) {
-        Swal.fire({ // CHANGE: Replaced alert with Swal
+        Swal.fire({
           title: 'Error',
           text: `Please fill all the details for item ${index + 1}.`,
           icon: 'error',
@@ -539,15 +623,14 @@ const Home1 = () => {
       if (linkItem.file) {
         const allowedTypes = [
           "image/jpeg", "image/jpg", "image/png", "image/gif", "image/svg+xml",
-          "video/mp4", "video/x-msvideo",
-          "video/mpeg", // CHANGE: Added video/mpeg
+          "video/mp4", "video/x-msvideo", "video/mpeg",
           "application/pdf", "application/vnd.ms-powerpoint",
           "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "text/plain" // CHANGE: Added text/plain for .txt files
+          "text/plain"
         ];
         if (!allowedTypes.includes(linkItem.file.type)) {
-          Swal.fire({ // CHANGE: Replaced alert with Swal
+          Swal.fire({
             title: 'Error',
             text: `Unsupported file type: ${linkItem.file.type}. Allowed types are JPEG, PNG, GIF, SVG, MP4, WEBM, OGG, MOV, AVI, MKV, MPEG, PDF, PPT, PPTX, DOC, DOCX, txt`,
             icon: 'error',
@@ -556,7 +639,7 @@ const Home1 = () => {
           return;
         }
         if (linkItem.file.size > 524288000) {
-          Swal.fire({ // CHANGE: Replaced alert with Swal
+          Swal.fire({
             title: 'Error',
             text: `File size exceeds the limit of 500MB: ${linkItem.file.name}. Please upload a smaller file.`,
             icon: 'error',
@@ -597,7 +680,7 @@ const Home1 = () => {
       }
     });
 
-    console.log('FormData:', Array.from(formData.entries())); // CHANGE: Added debug log for FormData
+    console.log('FormData:', Array.from(formData.entries()));
 
     setLoading(true);
 
@@ -771,7 +854,7 @@ const Home1 = () => {
                 onClick={handleBack}
               />
               <h2
-                className="font-bold text-gray-700 text-center"
+                className="font-bold text-gray-700"
                 style={{ fontFamily: 'Outfit', fontSize: '32px', lineHeight: '40.32px', color: '#FF9F00' }}
               >
                 Create New Screen
@@ -817,14 +900,11 @@ const Home1 = () => {
             </div>
 
             <div ref={scrollableContainerRef} className="scrollable-container w-full" style={{ maxHeight: '230px', overflowY: 'auto', width: '700px', position: 'relative', zIndex: 1 }}>
-
-
               {groups.map((group, groupIndex) => (
                 <div
                   key={group.id}
                   className="mb-2 border border-gray-300 rounded-2xl bg-white py-2 px-2 mr-2 ml-5"
                 >
-
                   <div className="flex flex-wrap items-end justify-between mb-2 gap-4">
                     <div className="flex items-center">
                       <button
@@ -836,9 +916,6 @@ const Home1 = () => {
                         <span className="text-sm">{getLayoutName(group.layout)}</span>
                       </button>
                     </div>
-
-
-
 
                     <div className="flex items-center">
                       <button
@@ -876,138 +953,9 @@ const Home1 = () => {
                         </>
                       )}
                     </div>
-
-
                   </div>
 
                   {group.items.map((item, itemIndex) => (
-                    // <div
-                    //   key={itemIndex}
-                    //   className="flex items-center"
-                    //   style={{ borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none', paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0' }}
-                    // >
-                    //   <div
-                    //     key={itemIndex}
-                    //     className="flex items-center gap-2"
-                    //     style={{
-                    //       borderBottom: itemIndex < group.items.length - 1 ? '1px solid #eee' : 'none',
-                    //       paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0',
-                    //     }}
-                    //   >
-                    //     {/* 📁 Upload Area */}
-                    //     <div className="flex-grow">
-                    //       <div
-                    //         className="relative flex items-center border-gray-300 rounded-md"
-                    //         style={{ width: "440px", paddingRight: '0px' }}
-                    //         onDragOver={(e) => e.preventDefault()}
-                    //         onDrop={(e) => {
-                    //           e.preventDefault();
-                    //           const droppedFiles = Array.from(e.dataTransfer.files);
-                    //           handleFileDrop(group.id, itemIndex, droppedFiles);
-                    //         }}
-                    //       >
-                    //         <button
-                    //           type="button"
-                    //           className="h-8 px-4 text-white rounded-l-lg flex items-center justify-center hover:bg-blue-700"
-                    //           onClick={() => document.getElementById(`file-input-${group.id}-${itemIndex}`).click()}
-                    //           style={{ backgroundColor: '#2d3748' }}
-                    //         >
-                    //           <FaFileArrowUp className="text-lg" style={{ paddingLeft: '6px' }} />
-                    //           <p style={{ fontFamily: 'Outfit', paddingLeft: '6px', paddingRight: '6px' }}>Upload</p>
-                    //         </button>
-                    //         <input
-                    //           type="file"
-                    //           className="hidden"
-                    //           onChange={(e) => handleInputChange(group.id, itemIndex, e)}
-                    //           id={`file-input-${group.id}-${itemIndex}`}
-                    //           accept="image/png,image/jpeg,image/gif,image/svg+xml,video/mp4,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                    //         />
-                    //         <input
-                    //           type="text"
-                    //           className="w-full p-1.5 text-sm border border-gray-300 border-dashed rounded-r-lg placeholder-gray-500"
-                    //           style={{
-
-                    //             width: '70%',
-                    //             backgroundColor: '#F7F7FF',
-                    //             paddingLeft: '12px',
-                    //             fontFamily: 'Outfit',
-                    //             color: item.file ? 'green' : 'black',
-                    //           }}
-                    //           placeholder="Embedded Link / Image / Video or Upload File"
-                    //           value={item.file ? item.file.name : item.link}
-                    //           onChange={(e) => {
-                    //             setGroups(groups.map(g => {
-                    //               if (g.id === group.id) {
-                    //                 const newItems = [...g.items];
-                    //                 newItems[itemIndex].link = e.target.value;
-                    //                 newItems[itemIndex].file = null;
-                    //                 return { ...g, items: newItems };
-                    //               }
-                    //               return g;
-                    //             }));
-                    //           }}
-                    //         />
-                    //       </div>
-                    //     </div>
-
-                    //     {/* ⏰ Enter Time */}
-                    //     <div className="flex flex-col">
-                    //       <label className="text-xs text-gray-600 font-medium mb-1">Time (sec)</label>
-                    //       <div className="relative">
-                    //         <IoTimeOutline style={{ position: 'absolute', top: '8px', left: '7px', color: '#6F7C8E' }} />
-                    //         <input
-                    //           type="number"
-                    //           value={group.time}
-                    //           onChange={(e) => handleTimeChange(group.id, e.target.value)}
-                    //           className="w-[112px] px-2 py-1 pl-6 pr-8 border border-gray-300 rounded-md text-center"
-                    //           placeholder="00"
-                    //         />
-                    //         <span
-                    //           className="absolute right-1 top-[3px] bg-black text-white text-xs rounded px-1 py-[6px]"
-                    //         >
-                    //           Sec
-                    //         </span>
-                    //       </div>
-                    //     </div>
-
-                    //     {/* 📅 Schedule Button */}
-                    //     <div className="flex flex-col">
-                    //       <label className="text-xs text-gray-600 font-medium mb-1">Schedule</label>
-                    //       <button
-                    //         onClick={() => openSchedulerModal(group.id)}
-                    //         className={`p-2 bg-rose-600 text-white rounded-lg text-sm text-center leading-tight ${group.schedule?.startTime || group.schedule?.startDate ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-200 text-gray-700'}`}
-
-                    //       >
-                    //         {group.schedule?.startTime || group.schedule?.startDate ? (
-                    //           <>
-                    //             Edit Schedule
-                    //           </>
-                    //         ) : (
-                    //           <>
-                    //             Add Schedule
-                    //           </>
-                    //         )}
-                    //       </button>
-                    //     </div>
-                    //   </div>
-
-                    //   {item.file?.type === 'application/pdf' && (
-                    //     <div className="flex justify-center mt-2 ml-10">
-                    //       <label className="flex flex-col items-center cursor-pointer text-center">
-                    //         <input
-                    //           type="checkbox"
-                    //           className="sr-only peer"
-                    //           checked={item.analyzeWithAI}
-                    //           onChange={() => toggleAnalyzeWithAI(group.id, itemIndex)}
-                    //         />
-                    //         <div className="relative w-11 h-6 bg-gray-400 rounded-full peer-focus:outline-none peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                    //         <span className="mt-2 text-sm font-medium text-black-700 leading-tight">
-                    //           Summarize<br />with AI
-                    //         </span>
-                    //       </label>
-                    //     </div>
-                    //   )}
-                    // </div>
                     <div
                       key={itemIndex}
                       className="flex items-start w-full gap-4"
@@ -1016,7 +964,6 @@ const Home1 = () => {
                         paddingBottom: itemIndex < group.items.length - 1 ? '10px' : '0',
                       }}
                     >
-                      {/* Upload Field */}
                       <div className="flex flex-col w-[440px]">
                         <label className="text-xs text-gray-600 font-medium mb-1">Upload</label>
                         <div
@@ -1065,7 +1012,6 @@ const Home1 = () => {
                         </div>
                       </div>
 
-                      {/* Time Field */}
                       <div className="flex flex-col w-[120px]">
                         <label className="text-xs text-gray-600 font-medium mb-1">Time (sec)</label>
                         <div className="relative">
@@ -1083,7 +1029,6 @@ const Home1 = () => {
                         </div>
                       </div>
 
-                      {/* Schedule Field */}
                       <div className="flex flex-col w-[140px]">
                         <label className="text-xs text-gray-600 font-medium mb-1">Schedule</label>
                         <button
@@ -1097,7 +1042,6 @@ const Home1 = () => {
                         </button>
                       </div>
                     </div>
-
                   ))}
                 </div>
               ))}
@@ -1126,42 +1070,6 @@ const Home1 = () => {
                       {groups.map((group, groupIndex) => (
                         <div key={group.id} className="border p-3 rounded-md">
                           <p className="text-sm font-medium mb-2">{getLayoutName(group.layout)}</p>
-                          {/* <div className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} gap-2`}>
-                            {group.items.map((item, itemIndex) => {
-                              console.log('Preview item:', item); // CHANGE: Added debug log for preview items
-                              return (
-                                <div key={itemIndex} className="border p-2 rounded-md">
-                                  {item.file ? (
-                                    item.file.type.startsWith("image/") ? (
-                                      <img
-                                        src={URL.createObjectURL(item.file)}
-                                        alt="Preview"
-                                        className="w-full h-auto rounded-md"
-                                      />
-                                    ) : item.file.type.startsWith("video/") ? (
-                                      <video
-                                        src={URL.createObjectURL(item.file)}
-                                        controls
-                                        className="w-full h-auto rounded-md"
-                                      />
-                                    ) : (
-                                      <p className="text-sm text-gray-700">Preview Not Availble</p>
-                                    )
-                                  ) : (
-                                    <a
-                                      href={item.link}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-500 underline text-sm"
-                                    >
-                                      {item.link}
-                                    </a>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div> */}
-
                           <div
                             className={`grid grid-cols-${layoutOptions.find(l => l.id === group.layout).cols} grid-rows-${layoutOptions.find(l => l.id === group.layout).rows} gap-2`}
                           >
@@ -1196,7 +1104,6 @@ const Home1 = () => {
                               </div>
                             ))}
                           </div>
-
                         </div>
                       ))}
                     </div>

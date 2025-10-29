@@ -134,8 +134,8 @@ process.on('unhandledRejection', (reason) => {
 });
 
 // Start HTTP server (or HTTPS if needed)
-// const PORT = 4081;  // Production port
-const PORT = 4082;  // Development port
+const PORT = 4081;  // Production port
+// const PORT = 4082;  // Development port
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`API Gateway running on http://${ipAddress}:${PORT}`);
 });
