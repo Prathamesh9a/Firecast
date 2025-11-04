@@ -56,6 +56,7 @@ const defaultSettings = {
     height: 48,
     fontSize: 16,
     visible: true,
+    rssFeed: ["nbc"], // Default RSS feed
   },
   dateTime: {
     position: "top-right",
@@ -344,7 +345,6 @@ const DocumentContent = React.memo(
       return Math.max(1, pixelsPerInterval);
     }, []);
 
-    // In DocumentContent component, update the scroll effect:
     useEffect(() => {
       if (
         fileType !== "pdf" ||
@@ -354,89 +354,184 @@ const DocumentContent = React.memo(
         showSummary
       )
         return;
-
+    
       const container = containerRef.current;
       let isScrolling = true;
       let scrollInterval = null;
       let hasStarted = false;
-
+      let restartTimeout = null;
+    
       const startScrolling = () => {
-        if (hasStarted || !isScrolling) return;
+        if (hasStarted || !isScrolling) {
+          console.log('⛔ Scroll start blocked:', { hasStarted, isScrolling });
+          return;
+        }
         hasStarted = true;
-
+    
+        // Get current position BEFORE resetting (for debugging)
+        const currentPosition = container.scrollTop;
+        console.log(`📍 Starting scroll from position: ${currentPosition}`);
+    
+        // Only reset to top if we're starting fresh (not resuming)
+        if (currentPosition < 100) {
+          container.scrollTop = 0;
+          console.log(`🔝 Reset to top`);
+        } else {
+          console.log(`▶️ Resuming from position: ${currentPosition}`);
+        }
+    
         const totalScrollHeight = container.scrollHeight;
         const containerHeight = container.clientHeight;
         const scrollableHeight = totalScrollHeight - containerHeight;
-
+    
         if (scrollableHeight <= 50) {
-          console.log("Not enough content to scroll");
+          console.log("⚠️ Not enough content to scroll");
           return;
         }
-
+    
         const scrollSpeed = calculateScrollSpeed(scrollableHeight, time);
-
+    
         console.log(
-          `Starting PDF scroll: ${scrollableHeight}px over ${time}s → ${scrollSpeed}px/50ms`
+          `🚀 Starting PDF scroll: ${scrollableHeight}px over ${time}s → ${scrollSpeed}px/50ms`
         );
-
+    
+        let consecutiveBottomCount = 0;
+    
         scrollInterval = setInterval(() => {
-          if (!isScrolling || !container) return;
-
+          if (!isScrolling || !container) {
+            if (scrollInterval) {
+              clearInterval(scrollInterval);
+              scrollInterval = null;
+            }
+            return;
+          }
+    
           const current = container.scrollTop;
-          const max = scrollableHeight;
-
-          if (current >= max - 10) {
-            container.scrollTo({ top: 0, behavior: "smooth" });
+          const max = container.scrollHeight - container.clientHeight;
+          const remaining = max - current;
+    
+          // Log progress every 10% for debugging
+          const progress = (current / max) * 100;
+          if (Math.floor(progress) % 10 === 0 && progress > 0) {
+            console.log(`📊 Scroll progress: ${Math.floor(progress)}% (${current}/${max})`);
+          }
+    
+          // More aggressive bottom detection with counter
+          if (remaining <= 2) {
+            consecutiveBottomCount++;
+            
+            console.log(`🎯 At bottom: count=${consecutiveBottomCount}, current=${current}, max=${max}, remaining=${remaining}`);
+            
+            // Only restart if we've been at bottom for 3 consecutive checks (150ms)
+            if (consecutiveBottomCount >= 3) {
+              console.log('📄 PDF scroll complete at bottom, resetting...');
+              
+              // Clear interval first
+              if (scrollInterval) {
+                clearInterval(scrollInterval);
+                scrollInterval = null;
+              }
+              
+              // Immediate reset
+              container.scrollTop = 0;
+              hasStarted = false;
+              consecutiveBottomCount = 0;
+              
+              // Force browser to acknowledge the scroll reset
+              void container.offsetHeight;
+              
+              // Double-check the reset worked
+              const afterReset = container.scrollTop;
+              console.log(`✅ Reset complete: scrollTop=${afterReset}`);
+              
+              if (afterReset > 10) {
+                console.error(`❌ Reset failed! Still at ${afterReset}px, forcing...`);
+                container.style.scrollBehavior = 'auto';
+                container.scrollTop = 0;
+                void container.offsetHeight;
+                container.scrollTop = 0; // Set twice to force
+                console.log(`🔧 Force reset result: ${container.scrollTop}px`);
+              }
+              
+              // Restart after a brief delay
+              restartTimeout = setTimeout(() => {
+                if (isScrolling && container) {
+                  const beforeRestart = container.scrollTop;
+                  console.log(`📄 Restarting scroll from position: ${beforeRestart}px`);
+                  startScrolling();
+                }
+              }, 200);
+            }
+            return;
           } else {
-            container.scrollTo({
-              top: Math.min(current + scrollSpeed, max),
-              behavior: "auto",
-            });
+            consecutiveBottomCount = 0;
+          }
+    
+          // Normal scrolling - ensure we don't overshoot
+          const nextPosition = Math.min(current + scrollSpeed, max);
+          
+          if (nextPosition !== current) {
+            container.scrollTop = nextPosition;
           }
         }, 50);
       };
-
+    
       // === Observer: Wait for scrollHeight to stabilize ===
       let lastHeight = 0;
       let stableCount = 0;
-      const STABLE_THRESHOLD = 3; // Wait for 3 consecutive same height
-      const CHECK_INTERVAL = 500; // Check every 500ms
-
+      const STABLE_THRESHOLD = 3;
+      const CHECK_INTERVAL = 500;
+    
       const heightObserver = setInterval(() => {
         if (!containerRef.current || !isScrolling) {
           clearInterval(heightObserver);
           return;
         }
-
+    
         const currentHeight = containerRef.current.scrollHeight;
-
+    
         if (currentHeight === lastHeight) {
           stableCount++;
         } else {
           stableCount = 0;
           lastHeight = currentHeight;
         }
-
-        if (stableCount >= STABLE_THRESHOLD && currentHeight > containerHeight) {
+    
+        if (stableCount >= STABLE_THRESHOLD && currentHeight > container.clientHeight) {
           clearInterval(heightObserver);
-          console.log(`PDF fully rendered. Height stable at ${currentHeight}px`);
-          startScrolling();
+          console.log(`✅ PDF fully rendered. Height stable at ${currentHeight}px`);
+          // Add delay before starting scroll in production
+          setTimeout(() => {
+            if (isScrolling && containerRef.current) {
+              startScrolling();
+            }
+          }, 500);
         }
       }, CHECK_INTERVAL);
-
+    
       // Fallback: Start after max 15 seconds even if not stable
       const maxWait = setTimeout(() => {
-        if (!hasStarted && containerRef.current) {
+        if (!hasStarted && containerRef.current && isScrolling) {
           clearInterval(heightObserver);
-          console.warn("PDF render timeout. Forcing scroll start.");
+          console.warn("⚠️ PDF render timeout. Forcing scroll start.");
           startScrolling();
         }
       }, 15000);
-
+    
       return () => {
+        console.log('🧹 Cleaning up PDF scroll effect');
         isScrolling = false;
-        hasStarted = true;
-        clearInterval(scrollInterval);
+        hasStarted = true; // Prevent any new starts
+        
+        // Clear all timeouts and intervals
+        if (scrollInterval) {
+          clearInterval(scrollInterval);
+          scrollInterval = null;
+        }
+        if (restartTimeout) {
+          clearTimeout(restartTimeout);
+          restartTimeout = null;
+        }
         clearInterval(heightObserver);
         clearTimeout(maxWait);
       };
@@ -447,7 +542,7 @@ const DocumentContent = React.memo(
       showSummary,
       time,
       calculateScrollSpeed,
-      pages.length, // ← Add this!
+      pages.length,
     ]);
 
     // Update container dimensions when content changes
@@ -1779,12 +1874,21 @@ const Preview = () => {
       setNews(cache.news.data);
       return;
     }
+    
     try {
-      // Ensure rssFeed is an array
-      const rssFeedValues = Array.isArray(settings.ticker.rssFeed)
-        ? settings.ticker.rssFeed
-        : [settings.ticker.rssFeed || "nbc"];
-
+      // FIX: Properly access the RSS feed from settings
+      const rssFeedValue = settings?.ticker?.rssFeed;
+      console.log("RSS Feed setting:", rssFeedValue, "Full settings:", settings);
+      
+      // Ensure rssFeed is an array and handle the value properly
+      const rssFeedValues = Array.isArray(rssFeedValue) 
+        ? rssFeedValue 
+        : rssFeedValue 
+          ? [rssFeedValue] 
+          : ["nbc"]; // Default fallback
+  
+      console.log("Processing RSS feed values:", rssFeedValues);
+  
       const feedUrls = rssFeedValues
         .map((value) => {
           const feed = rssFeedOptions.find((option) => option.value === value);
@@ -1795,15 +1899,15 @@ const Preview = () => {
           return feed.url;
         })
         .filter((url) => url);
-
-      // Log a warning if no valid URLs are found, but avoid pushing a default unless explicitly desired
-      // if (feedUrls.length === 0) {
-      //   console.warn("No valid RSS feed URLs found. Falling back to default.");
-      //   feedUrls.push("https://feeds.feedburner.com/ndtvnews-top-stories");
-      // }
-
-      console.log("Fetching news from RSS feeds:", feedUrls);
-
+  
+      console.log("Final feed URLs:", feedUrls);
+  
+      // Rest of your existing code...
+      if (feedUrls.length === 0) {
+        console.warn("No valid RSS feed URLs found. Using default.");
+        feedUrls.push("https://feeds.nbcnews.com/nbcnews/public/news");
+      }
+  
       const responses = await Promise.all(
         feedUrls.map(async (feedUrl) => {
           try {
@@ -1819,7 +1923,7 @@ const Preview = () => {
           }
         })
       );
-
+  
       let articles = [];
       responses.forEach((response) => {
         if (response.data.items) {
@@ -1834,7 +1938,7 @@ const Preview = () => {
           );
         }
       });
-
+  
       // Remove duplicates
       const seen = new Set();
       articles = articles.filter((article) => {
@@ -1843,7 +1947,7 @@ const Preview = () => {
         seen.add(key);
         return true;
       });
-
+  
       // Sort and limit articles
       articles = articles
         .sort((a, b) => {
@@ -1852,7 +1956,7 @@ const Preview = () => {
           return dateB - dateA;
         })
         .slice(0, 20);
-
+  
       // Fallback to news API if no articles are found
       if (articles.length === 0 && newsApiKey) {
         const fallbackResponse = await axios.get(
@@ -1869,7 +1973,7 @@ const Preview = () => {
             source: article.source.name,
           }));
       }
-
+  
       cache.news.data = articles;
       cache.news.timestamp = now;
       setNews(articles);
@@ -1877,8 +1981,7 @@ const Preview = () => {
       console.error("Error fetching news:", error);
       setNews([]);
     }
-  }, [settings.ticker.rssFeed, newsApiKey]);
-
+  }, [settings?.ticker?.rssFeed, newsApiKey]); // FIX: Use optional chaining in dependencies
   const updateVisibleItems = useCallback(
     (layout, groupedContent, index) => {
       const layoutConfig =

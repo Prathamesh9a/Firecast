@@ -67,6 +67,7 @@ const Home1 = () => {
       id: uuidv4(),
       layout: 'single',
       time: '',
+      isPptGroup: false,
       schedule: {
         startTime: '',
         endTime: '',
@@ -111,6 +112,25 @@ const Home1 = () => {
     setSchedulerModal({ open: false, groupId: null });
   };
 
+  const markGroupAsPpt = (groupId, file) => {
+    setGroups(prev => prev.map(g =>
+      g.id === groupId
+        ? {
+          ...g,
+          isPptGroup: true,
+          items: [{               // PPT replaces *all* items
+            id: uuidv4(),
+            link: URL.createObjectURL(file),
+            file,
+            fileName: file.name,
+            analyzeWithAI: false,
+          }],
+          displayName: file.name,
+          slideCount: 1,          // backend will fill the real count
+        }
+        : g
+    ));
+  };
   const toggleAnalyzeWithAI = (groupId, itemIndex) => {
     setGroups(groups.map(group => {
       if (group.id === groupId) {
@@ -161,31 +181,37 @@ const Home1 = () => {
 
   const selectLayout = (layoutId) => {
     if (currentGroupId) {
+      const group = groups.find(g => g.id === currentGroupId);
       const layout = layoutOptions.find(l => l.id === layoutId);
+
+      // ---- BLOCK NON-SINGLE FOR PPT ----
+      if (group.isPptGroup && layoutId !== 'single') {
+        Swal.fire({
+          title: 'Cannot change layout',
+          text: 'PPT slide groups must stay in **Single View** to keep slides intact.',
+          icon: 'warning',
+        });
+        return;
+      }
+
       const requiredItems = layout.itemCount;
-      setGroups(groups.map(group => {
-        if (group.id === currentGroupId) {
-          let newItems = [...group.items];
+      setGroups(groups.map(g => {
+        if (g.id === currentGroupId) {
+          let newItems = [...g.items];
           if (newItems.length < requiredItems) {
-            const newItemTemplate = {
-              link: '',
-              file: null,
-              analyzeWithAI: false,
-            };
             while (newItems.length < requiredItems) {
-              newItems.push({ ...newItemTemplate });
+              newItems.push({ link: '', file: null, analyzeWithAI: false });
             }
           } else if (newItems.length > requiredItems) {
             newItems = newItems.slice(0, requiredItems);
           }
-          return { ...group, layout: layoutId, items: newItems };
+          return { ...g, layout: layoutId, items: newItems };
         }
-        return group;
+        return g;
       }));
       closeLayoutModal();
     }
   };
-
   const handleManageUrl = () => {
     navigate('/editUrl');
   };
@@ -216,6 +242,7 @@ const Home1 = () => {
         id: uuidv4(),
         layout: 'single',
         time: '',
+        isPptGroup: false,
         schedule: {
           startTime: '',
           endTime: '',
@@ -298,12 +325,12 @@ const Home1 = () => {
       const buffer = numPages * 2; // 2s per page extra
       const time = Math.ceil(scrollTime + buffer);
 
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: time > 0 ? time : 10 } : g // min 10s
       ));
     } catch (error) {
       console.error('Error calculating PDF time:', error);
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
       ));
     }
@@ -327,12 +354,12 @@ const Home1 = () => {
       const layoutAdjustment = 1 / (cols * rows);
       const adjustedTime = Math.max(10, Math.ceil(readingTimeSeconds * layoutAdjustment));
 
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: adjustedTime } : g
       ));
     } catch (error) {
       console.error('Error calculating DOC/DOCX time:', error);
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
       ));
     }
@@ -355,12 +382,12 @@ const Home1 = () => {
       const layoutAdjustment = 1 / (cols * rows);
       const adjustedTime = Math.max(10, Math.ceil(readingTimeSeconds * layoutAdjustment));
 
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: adjustedTime } : g
       ));
     } catch (error) {
       console.error('Error calculating TXT time:', error);
-      setGroups(prevGroups => prevGroups.map(g => 
+      setGroups(prevGroups => prevGroups.map(g =>
         g.id === groupId ? { ...g, time: 30 } : g // fallback 30s
       ));
     }
@@ -402,6 +429,46 @@ const Home1 = () => {
     const isValidExtension = allowedExtensions.includes(fileExtension);
     const isValidSize = file.size <= maxFileSize;
 
+    // ----- inside handleInputChange / handleFileDrop after the size/extension checks -----
+    const isPptFile = file.type.includes('powerpoint') || ['ppt', 'pptx'].includes(fileExtension);
+
+    if (isPptFile) {
+      const group = groups.find(g => g.id === groupId);
+      if (group.layout !== 'single') {
+        Swal.fire({
+          title: 'PPT not allowed',
+          text: 'PPT files can only be uploaded in **Single View** layout. Change the layout first.',
+          icon: 'error',
+        });
+        return;
+      }
+
+      // ----- NEW: auto-convert to PPT group -----
+      if (!group.isPptGroup) {
+        // If the group already has more than one item → warn & replace
+        if (group.items.length > 1) {
+          const { isConfirmed } = Swal.fire({
+            title: 'Replace items?',
+            text: 'Uploading a PPT will replace all current items in this group with the PPT slides.',
+            icon: 'question',
+            showCancelButton: true,
+          });
+          if (!isConfirmed) return;
+        }
+        else if (group.layout == 'single') {
+          Swal.fire({
+            title: "Convert PPT to image?",
+            text: "Uploading a PPT will convert all items in this PPT slides into image.",
+            icon: "question",
+            showCancelButton: true,
+            confirmButtonText: "Yes, Convert",
+          });
+          return;
+        }
+        markGroupAsPpt(groupId, file);
+        return;   // stop normal item handling
+      }
+    }
     if (!isValidMime) {
       Swal.fire({
         title: 'Error',
@@ -461,8 +528,8 @@ const Home1 = () => {
       };
     } else if (file.type === "application/pdf") {
       calculatePdfTime(file, groupId, itemIndex);
-    } else if (file.type === "application/msword" || 
-               file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    } else if (file.type === "application/msword" ||
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
       calculateDocTime(file, groupId, itemIndex);
     } else if (file.type === "text/plain") {
       calculateTxtTime(file, groupId, itemIndex);
@@ -515,6 +582,46 @@ const Home1 = () => {
     const isValidExtension = allowedExtensions.includes(fileExtension);
     const isValidSize = file.size <= maxFileSize;
 
+    // ----- inside handleInputChange / handleFileDrop after the size/extension checks -----
+    const isPptFile = file.type.includes('powerpoint') || ['ppt', 'pptx'].includes(fileExtension);
+
+    if (isPptFile) {
+      const group = groups.find(g => g.id === groupId);
+      if (group.layout !== 'single') {
+        Swal.fire({
+          title: 'PPT not allowed',
+          text: 'PPT files can only be uploaded in **Single View** layout. Change the layout first.',
+          icon: 'error',
+        });
+        return;
+      }
+
+      // ----- NEW: auto-convert to PPT group -----
+      if (!group.isPptGroup) {
+        // If the group already has more than one item → warn & replace
+        if (group.items.length > 1) {
+          const { isConfirmed } = Swal.fire({
+            title: 'Replace items?',
+            text: 'Uploading a PPT will replace all current items in this group with the PPT slides.',
+            icon: 'question',
+            showCancelButton: true,
+          });
+          if (!isConfirmed) return;
+        }
+        else if (group.layout == 'single') {
+          Swal.fire({
+            title: "Convert PPT to image?",
+            text: "Uploading a PPT will replace all items in this PPT slides into image.",
+            icon: "question",
+            showCancelButton: true,
+            confirmButtonText: "Yes, Convert",
+          });
+          return;
+        }
+        markGroupAsPpt(groupId, file);
+        return;   // stop normal item handling
+      }
+    }
     if (!isValidMime) {
       Swal.fire({
         title: 'Error',
@@ -574,8 +681,8 @@ const Home1 = () => {
       };
     } else if (file.type === "application/pdf") {
       calculatePdfTime(file, groupId, itemIndex);
-    } else if (file.type === "application/msword" || 
-               file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+    } else if (file.type === "application/msword" ||
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
       calculateDocTime(file, groupId, itemIndex);
     } else if (file.type === "text/plain") {
       calculateTxtTime(file, groupId, itemIndex);
@@ -607,6 +714,8 @@ const Home1 = () => {
       layout: group.layout,
       time: group.time,
       schedule: group.schedule,
+      isPptGroup: group.isPptGroup,
+      originalGroupId: group.originalGroupId || null,
     })));
 
     for (const [index, linkItem] of links.entries()) {
@@ -659,6 +768,7 @@ const Home1 = () => {
       formData.append(`links[${index}][time]`, linkItem.time);
       formData.append(`links[${index}][analyzeWithAI]`, linkItem.analyzeWithAI);
       formData.append(`links[${index}][layout]`, linkItem.layout);
+      formData.append(`links[${index}][isPptGroup]`, linkItem.isPptGroup);
       formData.append(`links[${index}][schedule][startDate]`, linkItem.schedule.startDate);
       formData.append(`links[${index}][schedule][endDate]`, linkItem.schedule.endDate);
       formData.append(`links[${index}][schedule][frequency]`, linkItem.schedule.frequency);
@@ -1076,31 +1186,31 @@ const Home1 = () => {
                             {group.items.map((item, itemIndex) => (
                               <div key={itemIndex} className="border p-2 rounded-md">
                                 {item.file ? (
-                                    item.file.type.startsWith("image/") ? (
-                                      <img
-                                        src={URL.createObjectURL(item.file)}
-                                        alt="Preview"
-                                        className="w-full h-auto rounded-md"
-                                      />
-                                    ) : item.file.type.startsWith("video/") ? (
-                                      <video
-                                        src={URL.createObjectURL(item.file)}
-                                        controls
-                                        className="w-full h-auto rounded-md"
-                                      />
-                                    ) : (
-                                      <p className="text-sm text-gray-700">Preview Not Availble</p>
-                                    )
+                                  item.file.type.startsWith("image/") ? (
+                                    <img
+                                      src={URL.createObjectURL(item.file)}
+                                      alt="Preview"
+                                      className="w-full h-auto rounded-md"
+                                    />
+                                  ) : item.file.type.startsWith("video/") ? (
+                                    <video
+                                      src={URL.createObjectURL(item.file)}
+                                      controls
+                                      className="w-full h-auto rounded-md"
+                                    />
                                   ) : (
-                                    <a
-                                      href={item.link}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-blue-500 underline text-sm"
-                                    >
-                                      {item.link}
-                                    </a>
-                                  )}
+                                    <p className="text-sm text-gray-700">Preview Not Availble</p>
+                                  )
+                                ) : (
+                                  <a
+                                    href={item.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-500 underline text-sm"
+                                  >
+                                    {item.link}
+                                  </a>
+                                )}
                               </div>
                             ))}
                           </div>
@@ -1178,16 +1288,30 @@ const Home1 = () => {
                 <div className="bg-white p-6 rounded-lg max-w-md w-full">
                   <h2 className="text-xl font-bold mb-4">Select Layout</h2>
                   <div className="grid grid-cols-2 gap-4">
-                    {layoutOptions.map((layout) => (
-                      <button
-                        key={layout.id}
-                        onClick={() => selectLayout(layout.id)}
-                        className={`p-3 border rounded-md hover:bg-gray-50 ${groups.find(g => g.id === currentGroupId)?.layout === layout.id ? 'border-blue-500 bg-blue-50' : 'border-gray-300'}`}
-                      >
-                        <div className="text-sm font-medium mb-2">{layout.name}</div>
-                        {renderLayoutPreview(layout.id, groups.find(g => g.id === currentGroupId)?.layout === layout.id)}
-                      </button>
-                    ))}
+                    {layoutOptions.map((layout) => {
+                      const group = groups.find(g => g.id === currentGroupId);
+                      const disabled = group?.isPptGroup && layout.id !== 'single';
+
+                      return (
+                        <button
+                          key={layout.id}
+                          onClick={() => !disabled && selectLayout(layout.id)}
+                          disabled={disabled}
+                          className={`p-3 border rounded-md hover:bg-gray-50 ${disabled
+                              ? 'opacity-50 cursor-not-allowed border-gray-300'
+                              : group?.layout === layout.id
+                                ? 'border-blue-500 bg-blue-50'
+                                : 'border-gray-300'
+                            }`}
+                        >
+                          <div className="text-sm font-medium mb-2">
+                            {layout.name}
+                            {disabled && ' (PPT: Single only)'}
+                          </div>
+                          {renderLayoutPreview(layout.id, group?.layout === layout.id)}
+                        </button>
+                      );
+                    })}
                   </div>
                   <button
                     onClick={closeLayoutModal}

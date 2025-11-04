@@ -704,6 +704,44 @@ const EditUrl = () => {
       }));
     }
   };
+  const handlePptUploadAsGroup = (groupId, file) => {
+    if (!file.name.match(/\.(ppt|pptx)$/i)) return;
+
+    const group = currentEdit.groups.find(g => g.id === groupId);
+    if (group.layout !== "single") {
+      Swal.fire({
+        title: "Invalid Layout for PPT",
+        text: "PPT files can only be uploaded in 'Single View' layout. Please change the layout to 'Single View' first.",
+        icon: "error",
+        confirmButtonText: "OK",
+      });
+      return;
+    }
+
+    // Proceed with PPT upload
+    setCurrentEdit(prev => ({
+      ...prev,
+      groups: prev.groups.map(group => {
+        if (group.id === groupId) {
+          return {
+            ...group,
+            items: [{
+              id: uuidv4(),
+              link: URL.createObjectURL(file),
+              file,
+              fileName: file.name,
+              analyzeWithAI: false,
+              replacePpt: false,
+            }],
+            isPptGroup: true,
+            displayName: file.name,
+            slideCount: 1,
+          };
+        }
+        return group;
+      }),
+    }));
+  };
   const handleFileUpload = (groupId, itemIndex, e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -770,15 +808,35 @@ const EditUrl = () => {
       return;
     }
     const group = currentEdit.groups.find(g => g.id === groupId);
-    const isPptItem = group?.isPptGroup && (file.type.includes('powerpoint') || fileExtension === 'ppt' || fileExtension === 'pptx');
-    if (isPptItem) {
+    // Allow PPT only in non-PPT groups OR via Replace button
+    const isPptFile = file.type.includes('powerpoint') || ['ppt', 'pptx'].includes(fileExtension);
+
+    if (isPptFile && group.isPptGroup) {
+      // Trying to upload PPT into existing PPT group → block
       Swal.fire({
         title: "PPT Upload Not Allowed Here",
-        text: "To replace the entire PPT, use the 'Replace PPT' button on the group. Individual slides support images/videos only.",
+        text: "To replace the entire PPT, use the 'Replace PPT' button. Individual slides support images/videos only.",
         icon: "warning",
-        confirmButtonText: "OK",
       });
-      e.target.value = '';  // Clear input
+      e.target.value = '';
+      return;
+    }
+
+    if (isPptFile && !group.isPptGroup) {
+      // Uploading PPT into a normal group → convert group to PPT group
+      Swal.fire({
+        title: "Convert PPT to image?",
+        text: "Uploading a PPT will convert all items in this PPT slides into image.",
+        icon: "question",
+        showCancelButton: true,
+        confirmButtonText: "Yes, Convert",
+      }).then((result) => {
+        if (result.isConfirmed) {
+          // Trigger PPT handling (same as Replace, but for new upload)
+          handlePptUploadAsGroup(group.id, file);
+        }
+      });
+      e.target.value = '';
       return;
     }
     const url = URL.createObjectURL(file);
@@ -886,13 +944,26 @@ const EditUrl = () => {
       return;
     }
     const group = currentEdit.groups.find(g => g.id === groupId);
-    const isPptItem = group?.isPptGroup && (file.type.includes('powerpoint') || fileExtension === 'ppt' || fileExtension === 'pptx');
-    if (isPptItem) {
+    const isPptFile = file.type.includes('powerpoint') || ['ppt', 'pptx'].includes(fileExtension);
+
+    if (isPptFile && group.isPptGroup) {
       Swal.fire({
         title: "PPT Upload Not Allowed Here",
         text: "To replace the entire PPT, use the 'Replace PPT' button on the group. Individual slides support images/videos only.",
         icon: "warning",
         confirmButtonText: "OK",
+      });
+      return;
+    }
+    if (isPptFile && !group.isPptGroup) {
+      Swal.fire({
+        title: "Convert PPT to image?",
+        text: "Uploading a PPT will convert all items in this PPT slides into image.",
+        showCancelButton: true,
+      }).then((result) => {
+        if (result.isConfirmed) {
+          handlePptUploadAsGroup(group.id, file);
+        }
       });
       return;
     }
@@ -973,7 +1044,20 @@ const EditUrl = () => {
   };
   const selectLayout = (layoutId) => {
     if (currentGroupId) {
+      const group = currentEdit.groups.find(g => g.id === currentGroupId);
       const layout = layoutOptions.find((l) => l.id === layoutId);
+
+      // BLOCK: If group is PPT and new layout is not single
+      if (group.isPptGroup && layoutId !== "single") {
+        Swal.fire({
+          title: "Cannot Change Layout",
+          text: "PPT slide groups must remain in 'Single View' layout to preserve slide integrity.",
+          icon: "warning",
+          confirmButtonText: "OK",
+        });
+        return;
+      }
+
       const requiredItems = layout.itemCount;
       setCurrentEdit({
         ...currentEdit,
@@ -1430,12 +1514,12 @@ const EditUrl = () => {
                           <button
                             onClick={() => openSchedulerModal(group.id)}
                             className={`px-3 py-2 rounded-md text-sm font-medium ${group.schedule?.startTime ||
-                                group.schedule?.startDate ||
-                                group.schedule?.timeWindows?.some(
-                                  (tw) => tw.startTime || tw.endTime
-                                )
-                                ? "bg-blue-100 text-blue-700 border border-blue-300"
-                                : "bg-gray-200 text-gray-700"
+                              group.schedule?.startDate ||
+                              group.schedule?.timeWindows?.some(
+                                (tw) => tw.startTime || tw.endTime
+                              )
+                              ? "bg-blue-100 text-blue-700 border border-blue-300"
+                              : "bg-gray-200 text-gray-700"
                               }`}
                           >
                             {group.schedule?.startTime ||
@@ -1495,8 +1579,7 @@ const EditUrl = () => {
                                   <input
                                     type="file"
                                     className="hidden"
-                                    accept="image/*,video/*,application/pdf,application/vnd.*,text/plain"
-                                    onChange={(e) => handleFileUpload(group.id, itemIndex, e)}
+                                    accept=".jpg,.jpeg,.png,.gif,.svg,.mp4,.webm,.mov,.pdf,.ppt,.pptx,.doc,.docx,.txt" onChange={(e) => handleFileUpload(group.id, itemIndex, e)}
                                     id={`file-input-${group.id}-${item.id}`}
                                   />
                                   <input
@@ -1793,22 +1876,31 @@ const EditUrl = () => {
           <div className="bg-white p-6 rounded-lg max-w-md w-full">
             <h2 className="text-xl font-bold mb-4">Select Layout</h2>
             <div className="grid grid-cols-2 gap-4">
-              {layoutOptions.map((layout) => (
-                <button
-                  key={layout.id}
-                  onClick={() => selectLayout(layout.id)}
-                  className={`p-3 border rounded-md hover:bg-gray-50 ${currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
-                    ? "border-blue-500 bg-blue-50"
-                    : "border-gray-300"
-                    }`}
-                >
-                  <div className="text-sm font-medium mb-2">{layout.name}</div>
-                  {renderLayoutPreview(
-                    layout.id,
-                    currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
-                  )}
-                </button>
-              ))}
+              {layoutOptions.map((layout) => {
+                const isDisabled = currentEdit.groups.isPptGroup && layout.id !== "single";
+                return (
+                  <button
+                    key={layout.id}
+                    onClick={() => !isDisabled && selectLayout(layout.id)}
+                    disabled={isDisabled}
+                    className={`p-3 border rounded-md hover:bg-gray-50 ${isDisabled
+                        ? "opacity-50 cursor-not-allowed border-gray-300"
+                        : currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-300"
+                      }`}
+                  >
+                    <div className="text-sm font-medium mb-2">
+                      {layout.name}
+                      {isDisabled && " (PPT: Single only)"}
+                    </div>
+                    {renderLayoutPreview(
+                      layout.id,
+                      currentEdit.groups.find((g) => g.id === currentGroupId)?.layout === layout.id
+                    )}
+                  </button>
+                );
+              })}
             </div>
             <button
               onClick={closeLayoutModal}
