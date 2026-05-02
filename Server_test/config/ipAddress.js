@@ -1,1 +1,1 @@
-module.exports = { ipAddress: '10.10.20.174' };
+module.exports = { ipAddress: '10.10.20.227' };
