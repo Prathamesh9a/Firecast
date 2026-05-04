@@ -223,6 +223,7 @@ const allowedOrigins = [
     `https://welegovernance.welspun.com`,
     `http://localhost`,
     `http://${ipAddress}`,
+    `http://192.168.1.27:3000`,
 ];
 
 app.use(cors({

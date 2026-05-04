@@ -80,7 +80,8 @@ function initializeSocket(server) {
                     `http://122.179.140.84:86`,
                     `http://192.168.1.27:86`,
                     `https://welegovernance.welspun.com`,
-                    `http://localhost`,
+                    `http://localhost:3000`,
+                    `http://192.168.1.27:3000`,
                     `http://127.0.0.1`,
                 ];
 

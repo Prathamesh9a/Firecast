@@ -56,7 +56,7 @@ const defaultSettings = {
     height: 48,
     fontSize: 16,
     visible: true,
-    rssFeed: ["nbc"], // Default RSS feed
+    rssFeed: ["nbc"],
   },
   dateTime: {
     position: "top-right",
@@ -70,8 +70,8 @@ const defaultSettings = {
 
 // Cache for API responses
 const cache = {
-  weather: { data: null, timestamp: null, ttl: 15 * 60 * 1000 }, // 15 minutes
-  news: { data: null, timestamp: null, ttl: 30 * 60 * 1000 }, // 30 minutes
+  weather: { data: null, timestamp: null, ttl: 15 * 60 * 1000 },
+  news: { data: null, timestamp: null, ttl: 30 * 60 * 1000 },
 };
 
 const videoExtensions = [
@@ -79,6 +79,47 @@ const videoExtensions = [
   { ext: ".mov", type: "video/quicktime" },
   { ext: ".webm", type: "video/webm" },
 ];
+
+// ─── WebP slide extensions produced by convertPDFToImages ─────────────────────
+const isWebpSlide = (content) =>
+  content && content.toLowerCase().endsWith(".webp");
+
+// ─── Group consecutive slides that share the same groupId ─────────────────────
+// Returns an array of "display units". Each unit is either:
+//   { type: 'group', groupId, slides: [...items], time, layout, ... }  — for WebP slide groups
+//   { type: 'single', ...item }                                         — for everything else
+const buildDisplayUnits = (items) => {
+  const units = [];
+  let i = 0;
+
+  while (i < items.length) {
+    const item = items[i];
+
+    if (isWebpSlide(item.content) && item.groupId) {
+      // Collect all consecutive items that share this groupId
+      const gid = item.groupId;
+      const slides = [];
+      while (i < items.length && items[i].groupId === gid && isWebpSlide(items[i].content)) {
+        slides.push({ ...items[i], originalIndex: i });
+        i++;
+      }
+      units.push({
+        type: "group",
+        groupId: gid,
+        slides,
+        // Use the time / layout of the first slide
+        time: slides[0].time,
+        layout: slides[0].layout || "single",
+        content: slides[0].content, // Needed for layout detection
+      });
+    } else {
+      units.push({ type: "single", ...item, originalIndex: i });
+      i++;
+    }
+  }
+
+  return units;
+};
 
 // Temperature & AQI Component
 const TemperatureDisplay = React.memo(({ weather, position, visible }) => {
@@ -140,10 +181,7 @@ const renderFallbackUI = (
   </div>
 );
 
-// Function to check if the URL is a Power BI URL
-const isPowerBIUrl = (url) => {
-  return url && url.includes("powerbi.com");
-};
+const isPowerBIUrl = (url) => url && url.includes("powerbi.com");
 
 const isYouTubeLiveUrl = (url) => {
   if (!url) return false;
@@ -156,16 +194,13 @@ const isYouTubeLiveUrl = (url) => {
   return youtubePatterns.some((pattern) => pattern.test(url));
 };
 
-const isYouTubeUrl = (url) => {
-  return (
-    url &&
-    (url.includes("youtube.com/watch") ||
-      url.includes("youtube.com/live") ||
-      url.includes("youtu.be") ||
-      url.includes("youtube.com/embed") ||
-      url.includes("youtube.com/v"))
-  );
-};
+const isYouTubeUrl = (url) =>
+  url &&
+  (url.includes("youtube.com/watch") ||
+    url.includes("youtube.com/live") ||
+    url.includes("youtu.be") ||
+    url.includes("youtube.com/embed") ||
+    url.includes("youtube.com/v"));
 
 const getYouTubeEmbedUrl = (url) => {
   if (!url) return "";
@@ -184,8 +219,138 @@ const getYouTubeEmbedUrl = (url) => {
   return url;
 };
 
-// PageRenderer Component
-// PageRenderer Component
+// ─── WebpSlideGroup: renders all WebP slides of a converted document ──────────
+// Vertically stacked images in a scrollable container that auto-scrolls to
+// complete exactly one pass in `time` seconds, then loops.
+const WebpSlideGroup = React.memo(({ slides, time, isPaused, getContentUrl }) => {
+  const containerRef = useRef(null);
+  const rafRef = useRef(null);
+  const isActiveRef = useRef(true);
+
+  // Start the smooth scroll loop
+  const startScrollLoop = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.scrollTop = 0;
+
+    requestAnimationFrame(() => {
+      if (!isActiveRef.current) return;
+
+      const runLoop = (lastTs) => (timestamp) => {
+        if (!isActiveRef.current || !containerRef.current) return;
+
+        const scrollable = container.scrollHeight - container.clientHeight;
+        if (scrollable < 10) return; // Not enough content to scroll
+
+        const durationMs = (time > 0 ? time : 30) * 1000;
+        const pxPerMs = scrollable / durationMs;
+        const elapsed = lastTs === null ? 0 : timestamp - lastTs;
+        const advance = pxPerMs * elapsed;
+        const current = container.scrollTop;
+
+        if (current + advance >= scrollable - 1) {
+          // Reached the bottom — pause briefly, then restart
+          container.scrollTop = 0;
+          setTimeout(() => {
+            if (isActiveRef.current) startScrollLoop();
+          }, 500);
+          return;
+        }
+
+        container.scrollTop = current + advance;
+        rafRef.current = requestAnimationFrame(runLoop(timestamp));
+      };
+
+      rafRef.current = requestAnimationFrame(runLoop(null));
+    });
+  }, [time]);
+
+  // Wait until scrollHeight is stable before starting scroll
+  useEffect(() => {
+    if (isPaused) return;
+
+    isActiveRef.current = true;
+    const container = containerRef.current;
+    if (!container) return;
+
+    const CHECK_MS = 600;
+    const STABLE_ROUNDS = 4;
+    const MAX_WAIT_MS = 30_000;
+
+    let lastHeight = 0;
+    let stableCount = 0;
+    let checkId = null;
+    let maxWaitId = null;
+
+    const tryStart = () => {
+      clearInterval(checkId);
+      clearTimeout(maxWaitId);
+      startScrollLoop();
+    };
+
+    checkId = setInterval(() => {
+      if (!isActiveRef.current || !containerRef.current) {
+        clearInterval(checkId);
+        return;
+      }
+      const h = containerRef.current.scrollHeight;
+      if (h === lastHeight) {
+        stableCount++;
+      } else {
+        stableCount = 0;
+        lastHeight = h;
+      }
+      if (stableCount >= STABLE_ROUNDS && h > (containerRef.current.clientHeight || 0)) {
+        tryStart();
+      }
+    }, CHECK_MS);
+
+    maxWaitId = setTimeout(() => {
+      clearInterval(checkId);
+      startScrollLoop();
+    }, MAX_WAIT_MS);
+
+    return () => {
+      isActiveRef.current = false;
+      clearInterval(checkId);
+      clearTimeout(maxWaitId);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [isPaused, slides, startScrollLoop]);
+
+  // Pause / resume when isPaused changes mid-scroll
+  useEffect(() => {
+    if (isPaused) {
+      isActiveRef.current = false;
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    } else {
+      isActiveRef.current = true;
+      startScrollLoop();
+    }
+  }, [isPaused, startScrollLoop]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full h-full overflow-y-auto scrollbar-hidden bg-black"
+      style={{ scrollBehavior: "auto" }}
+    >
+      {slides.map((slide, idx) => (
+        <img
+          key={`slide-${slide.groupId}-${idx}`}
+          src={getContentUrl(slide.content)}
+          alt={`Slide ${idx + 1}`}
+          className="w-full h-auto block"
+          loading={idx === 0 ? "eager" : "lazy"}
+          draggable={false}
+        />
+      ))}
+    </div>
+  );
+});
+
+// PageRenderer Component (kept for AI-summarized PDFs that stay as .pdf)
 const PageRenderer = React.memo(({ page, pageNum }) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -197,49 +362,38 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
       const rect = containerRef.current.getBoundingClientRect();
       const newWidth = rect.width;
       setContainerWidth(newWidth);
-      setIsReady(newWidth > 0 && page && typeof page.render === 'function');
+      setIsReady(newWidth > 0 && page && typeof page.render === "function");
     } else {
       setContainerWidth(window.innerWidth);
-      setIsReady(page && typeof page.render === 'function');
+      setIsReady(page && typeof page.render === "function");
     }
   }, [page]);
 
   useEffect(() => {
     updateWidth();
     const resizeObserver = new ResizeObserver(updateWidth);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
+    if (containerRef.current) resizeObserver.observe(containerRef.current);
     window.addEventListener("resize", updateWidth);
-
     return () => {
-      if (containerRef.current) {
-        resizeObserver.unobserve(containerRef.current);
-      }
+      if (containerRef.current) resizeObserver.unobserve(containerRef.current);
       window.removeEventListener("resize", updateWidth);
     };
   }, [updateWidth]);
 
   useEffect(() => {
-    // Reset ready state when page changes
-    setIsReady(containerWidth > 0 && page && typeof page.render === 'function');
+    setIsReady(containerWidth > 0 && page && typeof page.render === "function");
   }, [page, containerWidth]);
 
   useEffect(() => {
-    if (!isReady || !canvasRef.current || containerWidth <= 0) {
-      return;
-    }
-
-    console.log(`Rendering PDF page ${pageNum} with width: ${containerWidth}`);
+    if (!isReady || !canvasRef.current || containerWidth <= 0) return;
 
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
+    let isCancelled = false;
 
     try {
       const viewport = page.getViewport({ scale: 1.0 });
       const aspectRatio = viewport.width / viewport.height;
-
-      // Calculate scale based on container width with some padding
       const scale = (containerWidth * 0.95 * window.devicePixelRatio) / viewport.width;
       const scaledViewport = page.getViewport({ scale });
 
@@ -247,38 +401,17 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
       canvas.height = scaledViewport.height;
       canvas.style.width = `${containerWidth * 0.95}px`;
       canvas.style.height = `${(containerWidth * 0.95) / aspectRatio}px`;
-
-      // Set higher quality rendering
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
 
-      const renderContext = {
-        canvasContext: context,
-        viewport: scaledViewport
-      };
-
-      let isCancelled = false;
-
-      console.log(`Starting render for page ${pageNum}`);
-      const renderTask = page.render(renderContext);
-
+      const renderTask = page.render({ canvasContext: context, viewport: scaledViewport });
       renderTask.promise
-        .then(() => {
-          if (!isCancelled) {
-            console.log(`Successfully rendered page ${pageNum}`);
-          }
-        })
-        .catch((error) => {
-          if (!isCancelled) {
-            console.error(`Error rendering page ${pageNum}:`, error);
-          }
-        });
+        .then(() => { if (!isCancelled) console.log(`Rendered page ${pageNum}`); })
+        .catch((err) => { if (!isCancelled) console.error(`Error rendering page ${pageNum}:`, err); });
 
       return () => {
         isCancelled = true;
-        if (renderTask && typeof renderTask.cancel === 'function') {
-          renderTask.cancel();
-        }
+        if (renderTask && typeof renderTask.cancel === "function") renderTask.cancel();
       };
     } catch (error) {
       console.error(`Error setting up render for page ${pageNum}:`, error);
@@ -306,14 +439,14 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
         <canvas
           ref={canvasRef}
           className="max-w-full h-auto shadow-lg"
-          key={`page-${pageNum}-${containerWidth}`} // Force re-render when width changes
+          key={`page-${pageNum}-${containerWidth}`}
         />
       )}
     </div>
   );
 });
 
-// DocumentContent Component
+// DocumentContent — only used for AI-summarized PDFs (.pdf files with a summary)
 const DocumentContent = React.memo(
   ({ content, summary, getContentUrl, isPaused, originalFormat, time }) => {
     const fileType = content?.split(".").pop()?.toLowerCase() || "";
@@ -321,10 +454,7 @@ const DocumentContent = React.memo(
     const [pages, setPages] = useState([]);
     const [error, setError] = useState(null);
     const [showSummary, setShowSummary] = useState(!!summary);
-    const [totalScrollHeight, setTotalScrollHeight] = useState(0);
-    const [containerHeight, setContainerHeight] = useState(0);
     const containerRef = useRef(null);
-    const scrollIntervalRef = useRef(null);
     const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.5 });
 
     const toggleSummary = useCallback((e) => {
@@ -332,40 +462,17 @@ const DocumentContent = React.memo(
       setShowSummary((prev) => !prev);
     }, []);
 
-
-    const calculateScrollSpeed = useCallback((scrollableHeight, time) => {
-      if (!time || time <= 0) return 2; // Default slow scroll
-
-      // Calculate pixels per second to complete scroll in given time
-      const pixelsPerSecond = scrollableHeight / time;
-      // Convert to pixels per 50ms (our interval)
-      const pixelsPerInterval = (pixelsPerSecond * 50) / 1000;
-
-      return Math.max(1, pixelsPerInterval);
-    }, []);
-
+    // Scroll logic for PDF pages
     useEffect(() => {
-      if (
-        fileType !== "pdf" ||
-        !inView ||
-        isPaused ||
-        !containerRef.current ||
-        showSummary
-      )
-        return;
+      if (fileType !== "pdf" || !inView || isPaused || !containerRef.current || showSummary) return;
 
       const container = containerRef.current;
-      let rafId = null;        // requestAnimationFrame handle
-      let isActive = true;     // cleanup guard
+      let rafId = null;
+      let isActive = true;
 
-      // ── Step 1: Wait until scrollHeight is stable ─────────────────────
-      // On a Smart TV a large PDF can keep growing for 10–20 s while pages
-      // finish painting.  We wait for the height to stay the same across
-      // STABLE_ROUNDS consecutive checks, each CHECK_MS apart.
-      const CHECK_MS = 800;   // check every 800 ms (was 500 ms)
-      const STABLE_ROUNDS = 5;    // need 5 stable rounds = 4 s of stability (was 3 = 1.5 s)
-      const MAX_WAIT_MS = 40_000; // give up and scroll anyway after 40 s (was 15 s)
-
+      const CHECK_MS = 800;
+      const STABLE_ROUNDS = 5;
+      const MAX_WAIT_MS = 40_000;
       let lastHeight = 0;
       let stableCount = 0;
       let heightCheckId = null;
@@ -373,209 +480,96 @@ const DocumentContent = React.memo(
 
       const startScrolling = () => {
         if (!isActive || !containerRef.current) return;
-
-        // Reset to top before starting
         container.scrollTop = 0;
-
-        // Allow one frame for the browser to acknowledge the reset
-        requestAnimationFrame(() => {
-          if (!isActive) return;
-          runScrollLoop();
-        });
+        requestAnimationFrame(() => { if (isActive) runScrollLoop(); });
       };
 
-      // ── Step 2: Smooth scroll loop using requestAnimationFrame ─────────
-      // We calculate how many pixels to advance per frame so that the
-      // entire document scrolls past exactly once in `time` seconds.
       const runScrollLoop = () => {
-        const scrollableHeight =
-          container.scrollHeight - container.clientHeight;
-
-        if (scrollableHeight < 50) {
-          // Not enough to scroll — nothing to do
-          return;
-        }
-
-        // pixels per millisecond derived from the item's display time
+        const scrollableHeight = container.scrollHeight - container.clientHeight;
+        if (scrollableHeight < 50) return;
         const durationMs = (time > 0 ? time : 30) * 1000;
         const pxPerMs = scrollableHeight / durationMs;
         let lastTimestamp = null;
 
         const step = (timestamp) => {
           if (!isActive || !containerRef.current) return;
-
           if (lastTimestamp === null) lastTimestamp = timestamp;
           const elapsed = timestamp - lastTimestamp;
           lastTimestamp = timestamp;
-
           const max = container.scrollHeight - container.clientHeight;
           const current = container.scrollTop;
           const advance = pxPerMs * elapsed;
-
           if (current + advance >= max - 1) {
-            // Reached the bottom — jump back to top and restart
             container.scrollTop = 0;
-            // Brief pause at the top so it doesn't feel jarring
-            setTimeout(() => {
-              if (isActive) runScrollLoop();
-            }, 600);
+            setTimeout(() => { if (isActive) runScrollLoop(); }, 600);
             return;
           }
-
           container.scrollTop = current + advance;
           rafId = requestAnimationFrame(step);
         };
-
         rafId = requestAnimationFrame(step);
       };
 
-      // ── Height-stability watcher ────────────────────────────────────────
       heightCheckId = setInterval(() => {
-        if (!isActive || !containerRef.current) {
-          clearInterval(heightCheckId);
-          return;
-        }
-
+        if (!isActive || !containerRef.current) { clearInterval(heightCheckId); return; }
         const h = containerRef.current.scrollHeight;
-        if (h === lastHeight) {
-          stableCount++;
-        } else {
-          stableCount = 0;
-          lastHeight = h;
-        }
-
-        if (
-          stableCount >= STABLE_ROUNDS &&
-          h > (containerRef.current.clientHeight || 0)
-        ) {
+        if (h === lastHeight) { stableCount++; } else { stableCount = 0; lastHeight = h; }
+        if (stableCount >= STABLE_ROUNDS && h > (containerRef.current.clientHeight || 0)) {
           clearInterval(heightCheckId);
           clearTimeout(maxWaitId);
-          console.log(`✅ PDF height stable at ${h}px — starting scroll`);
           startScrolling();
         }
       }, CHECK_MS);
 
-      // Hard deadline — start scrolling even if PDF is still rendering
       maxWaitId = setTimeout(() => {
         if (!isActive) return;
         clearInterval(heightCheckId);
-        console.warn("⚠️ PDF height never stabilised — forcing scroll start");
         startScrolling();
       }, MAX_WAIT_MS);
 
-      // ── Cleanup ─────────────────────────────────────────────────────────
       return () => {
         isActive = false;
         if (rafId) cancelAnimationFrame(rafId);
         if (heightCheckId) clearInterval(heightCheckId);
         if (maxWaitId) clearTimeout(maxWaitId);
       };
-    }, [
-      fileType,
-      inView,
-      isPaused,
-      showSummary,
-      time,
-      pages.length,   // restart when more pages finish rendering
-    ]);
+    }, [fileType, inView, isPaused, showSummary, time, pages.length]);
 
-    // Update container dimensions when content changes
     useEffect(() => {
-      if (containerRef.current && pages.length > 0) {
-        const container = containerRef.current;
-        const updateDimensions = () => {
-          setTotalScrollHeight(container.scrollHeight);
-          setContainerHeight(container.clientHeight);
-        };
-
-        updateDimensions();
-
-        const resizeObserver = new ResizeObserver(updateDimensions);
-        resizeObserver.observe(container);
-
-        return () => {
-          resizeObserver.unobserve(container);
-        };
-      }
-    }, [pages]);
-
-    // Reset scroll position when content changes
-    useEffect(() => {
-      if (containerRef.current) {
-        containerRef.current.scrollTop = 0;
-      }
+      if (containerRef.current) containerRef.current.scrollTop = 0;
     }, [content]);
 
-    // Right before the PDF loading useEffect
-    useEffect(() => {
-      console.log('📄 PDF Effect Deps Changed:', {
-        fileType,
-        fileUrl,
-        inView,
-        showSummary,
-        timestamp: new Date().toISOString()
-      });
-    }, [fileType, fileUrl, inView, showSummary]);
-
-    // In DocumentContent component
     const [isRendering, setIsRendering] = useState(false);
     const renderTimeoutRef = useRef(null);
 
     useEffect(() => {
       if (fileType !== "pdf" || !inView || showSummary || !fileUrl) return;
-
-      // Prevent reload if already rendering
-      if (isRendering) {
-        console.log("⚠️ PDF already rendering, skipping reload");
-        return;
-      }
+      if (isRendering) return;
 
       setIsRendering(true);
-      console.log("Loading PDF:", fileUrl);
-
       const loadPdf = async () => {
         try {
           const pdf = await pdfjsLib.getDocument(fileUrl).promise;
-          console.log("PDF loaded successfully, pages:", pdf.numPages);
-
-          const numPages = pdf.numPages;
           const pageData = [];
-
-          for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+          for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
             try {
               const page = await pdf.getPage(pageNum);
               const viewport = page.getViewport({ scale: 1.0 });
               pageData.push({ pageNum, viewport, page });
-            } catch (pageError) {
-              console.error(`Error loading page ${pageNum}:`, pageError);
-            }
+            } catch (e) { console.error(`Error loading page ${pageNum}:`, e); }
           }
-
-          if (pageData.length === 0) {
-            setError("No valid pages found in PDF");
-          } else {
-            setPages(pageData);
-            setError(null);
-          }
+          if (pageData.length === 0) { setError("No valid pages found in PDF"); }
+          else { setPages(pageData); setError(null); }
         } catch (error) {
           console.error("Error loading PDF:", error);
           setError("Wait Your Content Is Loading");
         } finally {
-          // Mark as done after a delay to ensure rendering completes
-          renderTimeoutRef.current = setTimeout(() => {
-            setIsRendering(false);
-          }, 2000);
+          renderTimeoutRef.current = setTimeout(() => setIsRendering(false), 2000);
         }
       };
-
       loadPdf();
-
-      return () => {
-        if (renderTimeoutRef.current) {
-          clearTimeout(renderTimeoutRef.current);
-        }
-      };
-    }, [fileType, fileUrl, inView, showSummary]); // Removed isRendering from deps
+      return () => { if (renderTimeoutRef.current) clearTimeout(renderTimeoutRef.current); };
+    }, [fileType, fileUrl, inView, showSummary]);
 
     const cleanedSummary = summary
       ? summary.replace(/<think>[\s\S]*<\/think>/g, "").trim()
@@ -586,14 +580,9 @@ const DocumentContent = React.memo(
         <div className="relative w-full h-screen">
           <div className="w-full h-screen overflow-y-auto scrollbar-hidden bg-gray-900 p-8">
             <div className="max-w-3xl mx-auto">
-              <h2 className="text-2xl font-bold mb-6 text-white">
-                Document Summary
-              </h2>
+              <h2 className="text-2xl font-bold mb-6 text-white">Document Summary</h2>
               <div className="prose prose-lg prose-invert">
-                <div
-                  dangerouslySetInnerHTML={{ __html: cleanedSummary }}
-                  className="text-white"
-                />
+                <div dangerouslySetInnerHTML={{ __html: cleanedSummary }} className="text-white" />
               </div>
             </div>
           </div>
@@ -611,30 +600,20 @@ const DocumentContent = React.memo(
       return (
         <div className="relative w-full h-screen">
           <div
-            ref={(node) => {
-              containerRef.current = node;
-              ref(node);
-            }}
+            ref={(node) => { containerRef.current = node; ref(node); }}
             className="w-full h-screen overflow-y-auto scrollbar-hidden"
             style={{ scrollBehavior: "auto" }}
           >
             {inView ? (
               <div className="w-full min-h-screen flex flex-col items-center bg-gray-900">
                 {error ? (
-                  <div className="w-full h-screen flex items-center justify-center text-white">
-                    {error}
-                  </div>
+                  <div className="w-full h-screen flex items-center justify-center text-white">{error}</div>
                 ) : pages.length > 0 ? (
-                  <>
-                    {pages.map((page) => (
-                      <div
-                        key={`page-container-${page.pageNum}`}
-                        className="w-full mb-4"
-                      >
-                        <PageRenderer page={page.page} pageNum={page.pageNum} />
-                      </div>
-                    ))}
-                  </>
+                  pages.map((page) => (
+                    <div key={`page-container-${page.pageNum}`} className="w-full mb-4">
+                      <PageRenderer page={page.page} pageNum={page.pageNum} />
+                    </div>
+                  ))
                 ) : (
                   <div className="w-full h-screen flex items-center justify-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
@@ -660,41 +639,11 @@ const DocumentContent = React.memo(
     }
 
     return (
-      <div className="relative w-full h-screen">
-        <div
-          ref={(node) => {
-            containerRef.current = node;
-            ref(node);
-          }}
-          className="w-full h-screen overflow-y-auto scrollbar-hidden"
-          style={{ scrollBehavior: "smooth" }}
-        >
-          {inView ? (
-            <div className="w-full h-screen flex items-center justify-center text-white bg-gray-900">
-              <div className="text-center">
-                <p className="text-xl font-semibold mb-2">
-                  Wait Your Content Is Loading
-                </p>
-                <p className="text-lg">
-                  The document may not have been converted to PDF correctly.
-                  Please contact support.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-            </div>
-          )}
+      <div className="w-full h-screen flex items-center justify-center text-white bg-gray-900">
+        <div className="text-center">
+          <p className="text-xl font-semibold mb-2">Wait Your Content Is Loading</p>
+          <p className="text-lg">The document may not have been converted correctly.</p>
         </div>
-        {cleanedSummary && (
-          <button
-            onClick={toggleSummary}
-            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
-          >
-            View Summary
-          </button>
-        )}
       </div>
     );
   }
@@ -727,19 +676,13 @@ const MediaItem = React.memo(
       if (
         videoRef.current &&
         content?.content &&
-        videoExtensions.some((video) =>
-          content.content.toLowerCase().endsWith(video.ext)
-        )
+        videoExtensions.some((video) => content.content.toLowerCase().endsWith(video.ext))
       ) {
         videoRefs.current[index] = videoRef.current;
       }
       return () => {
-        if (videoRefs.current[index]) {
-          delete videoRefs.current[index];
-        }
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
+        if (videoRefs.current[index]) delete videoRefs.current[index];
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
       };
     }, [index, videoRefs, content]);
 
@@ -750,30 +693,16 @@ const MediaItem = React.memo(
           setProgress((e.target.currentTime / e.target.duration) * 100);
           lastUpdateRef.current = now;
         }
-
         const video = e.target;
-        if (
-          video.duration - video.currentTime <= 1.0 &&
-          !isPaused &&
-          !hasResetRef.current
-        ) {
+        if (video.duration - video.currentTime <= 1.0 && !isPaused && !hasResetRef.current) {
           hasResetRef.current = true;
           video.pause();
           video.currentTime = 0;
           setTimeout(() => {
             if (!isPaused) {
               video.play().catch((err) => {
-                console.error(
-                  "Error replaying video on pre-emptive reset:",
-                  err
-                );
-                setError({
-                  message: `Failed to replay video: ${err.message}`,
-                  details: {
-                    code: err.code || "N/A",
-                    userAgent: navigator.userAgent,
-                  },
-                });
+                console.error("Error replaying video:", err);
+                setError({ message: `Failed to replay video: ${err.message}`, details: { code: err.code || "N/A", userAgent: navigator.userAgent } });
               });
             }
             hasResetRef.current = false;
@@ -785,22 +714,10 @@ const MediaItem = React.memo(
 
     const handleManualPlay = () => {
       if (videoRef.current) {
-        videoRef.current
-          .play()
-          .then(() => {
-            setRequiresInteraction(false);
-            setError(null);
-            console.log("Video started after user interaction");
-          })
+        videoRef.current.play()
+          .then(() => { setRequiresInteraction(false); setError(null); })
           .catch((err) => {
-            console.error("Manual play failed:", err);
-            setError({
-              message: `Failed to play video: ${err.message}`,
-              details: {
-                code: err.code || "N/A",
-                userAgent: navigator.userAgent,
-              },
-            });
+            setError({ message: `Failed to play video: ${err.message}`, details: { code: err.code || "N/A", userAgent: navigator.userAgent } });
           });
       }
     };
@@ -808,151 +725,58 @@ const MediaItem = React.memo(
     const handleError = useCallback(
       (e) => {
         const video = videoRef.current;
-        const errorDetails = {
-          message: e.target.error?.message || "Unknown video error",
-          code: e.target.error?.code || "N/A",
-          userAgent: navigator.userAgent,
-          src: e.target.currentSrc,
-        };
-
+        const errorDetails = { message: e.target.error?.message || "Unknown video error", code: e.target.error?.code || "N/A", userAgent: navigator.userAgent, src: e.target.currentSrc };
         if (video && video.currentTime >= video.duration - 0.1) {
-          console.warn(
-            "End of video reached. Reloading video source:",
-            errorDetails
-          );
           try {
             const currentSrc = video.currentSrc || video.src;
-            if (!currentSrc) {
-              throw new Error("No video source found to reload.");
-            }
-            video.pause();
-            video.src = "";
-            video.load();
-            video.src = currentSrc;
-            video.load();
-            if (!isPaused) {
-              video.play().catch((err) => {
-                console.error("Failed to autoplay after reload:", err);
-                setError({
-                  message: `Failed to replay video after reload: ${err.message}`,
-                  details: {
-                    code: err.code || "N/A",
-                    userAgent: navigator.userAgent,
-                  },
-                });
-              });
-            }
+            if (!currentSrc) throw new Error("No video source found to reload.");
+            video.pause(); video.src = ""; video.load(); video.src = currentSrc; video.load();
+            if (!isPaused) video.play().catch((err) => setError({ message: `Failed to replay video after reload: ${err.message}`, details: { code: err.code || "N/A", userAgent: navigator.userAgent } }));
           } catch (err) {
-            console.error("Video reload error:", err);
-            setError({
-              message: `Error while reloading video: ${err.message}`,
-              details: {
-                userAgent: navigator.userAgent,
-              },
-            });
+            setError({ message: `Error while reloading video: ${err.message}`, details: { userAgent: navigator.userAgent } });
           }
           return;
         }
-
-        console.error("Video error:", errorDetails);
-        setIsLoading(false);
-        setVideoReady(false);
-        setError({
-          message: `Video failed to load`,
-          details: errorDetails,
-        });
+        setIsLoading(false); setVideoReady(false);
+        setError({ message: "Video failed to load", details: errorDetails });
       },
       [isPaused]
     );
 
     useEffect(() => {
-      if (
-        !videoRef.current ||
-        !inView ||
-        !content?.content ||
-        !videoExtensions.some((video) =>
-          content.content.toLowerCase().endsWith(video.ext)
-        )
-      ) {
-        setIsLoading(false);
-        return;
+      if (!videoRef.current || !inView || !content?.content || !videoExtensions.some((v) => content.content.toLowerCase().endsWith(v.ext))) {
+        setIsLoading(false); return;
       }
-
-      setIsLoading(true);
-      setVideoReady(false);
+      setIsLoading(true); setVideoReady(false);
       const video = videoRef.current;
 
       const attemptToPlayVideo = () => {
         if (!video) return;
-        video
-          .play()
-          .then(() => {
-            setIsLoading(false);
-          })
-          .catch((err) => {
-            console.error("Playback failed:", err);
-            setIsLoading(false);
-            if (err.name === "NotAllowedError") {
-              setRequiresInteraction(true);
-              setError({
-                message: "Autoplay blocked: User interaction required",
-                details: {
-                  code: "NotAllowedError",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            } else {
-              setError({
-                message: `Video playback failed: ${err.message}`,
-                details: {
-                  code: err.code || "N/A",
-                  userAgent: navigator.userAgent,
-                },
-              });
-            }
-          });
+        video.play().then(() => setIsLoading(false)).catch((err) => {
+          setIsLoading(false);
+          if (err.name === "NotAllowedError") { setRequiresInteraction(true); setError({ message: "Autoplay blocked: User interaction required", details: { code: "NotAllowedError", userAgent: navigator.userAgent } }); }
+          else setError({ message: `Video playback failed: ${err.message}`, details: { code: err.code || "N/A", userAgent: navigator.userAgent } });
+        });
       };
 
       const handleCanPlay = () => {
         if (!video) return;
-        console.log(`Video can play: ${video.src}`);
-        setVideoReady(true);
-        setError(null);
-        if (!isPaused && !requiresInteraction) {
-          attemptToPlayVideo();
-        } else {
-          setIsLoading(false);
-        }
+        setVideoReady(true); setError(null);
+        if (!isPaused && !requiresInteraction) attemptToPlayVideo();
+        else setIsLoading(false);
       };
 
       video.addEventListener("canplay", handleCanPlay);
       video.addEventListener("loadeddata", handleCanPlay);
       video.addEventListener("error", handleError);
       video.addEventListener("timeupdate", handleTimeUpdate);
-
-      const handlePlaying = () => {
-        console.log("Video is now playing");
-        setIsLoading(false);
-      };
+      const handlePlaying = () => setIsLoading(false);
       video.addEventListener("playing", handlePlaying);
-
       video.load();
-
-      if (isPaused) {
-        video.pause();
-      } else if (videoReady && !error && !requiresInteraction) {
+      if (isPaused) video.pause();
+      else if (videoReady && !error && !requiresInteraction) {
         video.play().catch((err) => {
-          console.error("Initial playback failed:", err);
-          if (err.name === "NotAllowedError") {
-            setRequiresInteraction(true);
-            setError({
-              message: "Autoplay blocked: User interaction required",
-              details: {
-                code: "NotAllowedError",
-                userAgent: navigator.userAgent,
-              },
-            });
-          }
+          if (err.name === "NotAllowedError") { setRequiresInteraction(true); setError({ message: "Autoplay blocked: User interaction required", details: { code: "NotAllowedError", userAgent: navigator.userAgent } }); }
         });
       }
 
@@ -962,25 +786,11 @@ const MediaItem = React.memo(
         video.removeEventListener("error", handleError);
         video.removeEventListener("timeupdate", handleTimeUpdate);
         video.removeEventListener("playing", handlePlaying);
-        if (timeoutRef.current) {
-          clearTimeout(timeoutRef.current);
-        }
+        if (timeoutRef.current) clearTimeout(timeoutRef.current);
       };
-    }, [
-      isPaused,
-      inView,
-      index,
-      content,
-      fallbackSrc,
-      requiresInteraction,
-      handleTimeUpdate,
-      handleError,
-    ]);
+    }, [isPaused, inView, index, content, fallbackSrc, requiresInteraction, handleTimeUpdate, handleError]);
 
     if (!content || !content.content) {
-      console.warn(`MediaItem: No content provided for index ${index}`, {
-        content,
-      });
       return (
         <div className="w-full h-full flex items-center justify-center text-white bg-gray-900">
           <p>No content available for this item.</p>
@@ -990,84 +800,71 @@ const MediaItem = React.memo(
 
     const contentUrl = getContentUrl(content.content);
 
-    if (isPowerBIUrl(content.content)) {
-      return (
-        <iframe
-          src={contentUrl}
-          className="w-full h-full"
-          title="Embedded Power BI Report"
-          frameBorder="0"
-          allowFullScreen
-        />
-      );
-    } else if (isWebpageUrl(content.content)) {
-      return <WebpageEmbed webpageUrl={contentUrl} />;
-    } else if (
-      videoExtensions.some((video) =>
-        content.content.toLowerCase().endsWith(video.ext)
-      )
-    ) {
-      const originalSrc = contentUrl;
-      const isMov = content.content.toLowerCase().endsWith(".mov");
-      const isWebm = content.content.toLowerCase().endsWith(".webm");
-      const videoSrc = fallbackSrc || originalSrc;
-
+    // ── WebP slide: single slide shown as image (only when NOT in a group) ──
+    // Groups are handled by WebpSlideGroup above — individual .webp items
+    // without a groupId (or already extracted from a group) fall here.
+    if (isWebpSlide(content.content)) {
       return (
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              <video
-                ref={videoRef}
-                autoPlay={!isPaused}
-                muted
-                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"
-                  }`}
+              <img
+                src={contentUrl}
+                alt="Slide"
+                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`}
                 style={{ transition: "opacity 0.3s ease" }}
-              >
-                <source
-                  src={videoSrc}
-                  type={
-                    videoSrc.toLowerCase().endsWith(".mp4")
-                      ? "video/mp4"
-                      : isMov
-                        ? "video/quicktime"
-                        : "video/webm"
-                  }
-                />
-                Your browser does not support the video tag.
-              </video>
-
+                loading="eager"
+                onLoad={() => setIsLoading(false)}
+                onError={() => { setIsLoading(false); setError({ message: "Slide failed to load", details: { code: "N/A", userAgent: navigator.userAgent } }); }}
+              />
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
                   <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
                 </div>
               )}
-
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>
-                  {error.details && (
-                    <p className="text-sm text-gray-400 mt-2">
-                      Error Code: {error.details.code}
-                      <br />
-                      Browser: {error.details.userAgent}
-                    </p>
-                  )}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="w-full h-full bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (isPowerBIUrl(content.content)) {
+      return <iframe src={contentUrl} className="w-full h-full" title="Embedded Power BI Report" frameBorder="0" allowFullScreen />;
+    } else if (isWebpageUrl(content.content)) {
+      return <WebpageEmbed webpageUrl={contentUrl} />;
+    } else if (videoExtensions.some((video) => content.content.toLowerCase().endsWith(video.ext))) {
+      const isMov = content.content.toLowerCase().endsWith(".mov");
+      const videoSrc = fallbackSrc || contentUrl;
+      return (
+        <div ref={ref} className="w-full h-full relative">
+          {inView ? (
+            <>
+              <video ref={videoRef} autoPlay={!isPaused} muted className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`} style={{ transition: "opacity 0.3s ease" }}>
+                <source src={videoSrc} type={videoSrc.toLowerCase().endsWith(".mp4") ? "video/mp4" : isMov ? "video/quicktime" : "video/webm"} />
+                Your browser does not support the video tag.
+              </video>
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
+                  <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-b-4 border-white"></div>
+                </div>
+              )}
+              {error && !isLoading && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
+                  <p className="text-lg font-semibold">{error.message}</p>
+                  {error.details && <p className="text-sm text-gray-400 mt-2">Error Code: {error.details.code}<br />Browser: {error.details.userAgent}</p>}
                   {requiresInteraction && (
-                    <button
-                      onClick={handleManualPlay}
-                      className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg flex items-center gap-2"
-                    >
-                      <FaPlay size={20} />
-                      Play Video
+                    <button onClick={handleManualPlay} className="mt-4 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg flex items-center gap-2">
+                      <FaPlay size={20} /> Play Video
                     </button>
-                  )}
-                  {content.thumbnail && (
-                    <img
-                      src={getContentUrl(content.thumbnail)}
-                      alt="Video fallback"
-                      className="mt-4 max-w-full max-h-64 object-contain"
-                    />
                   )}
                 </div>
               )}
@@ -1080,6 +877,7 @@ const MediaItem = React.memo(
         </div>
       );
     } else if (content.content.endsWith(".pdf")) {
+      // Only AI-summarized PDFs reach here — everything else is now WebP
       return (
         <DocumentContent
           content={content.content}
@@ -1094,12 +892,7 @@ const MediaItem = React.memo(
       return (
         <div ref={ref} className="w-full h-full">
           {inView ? (
-            <YouTubeLive
-              liveUrl={contentUrl}
-              isPaused={isPaused}
-              inView={inView}
-              showControls={false}
-            />
+            <YouTubeLive liveUrl={contentUrl} isPaused={isPaused} inView={inView} showControls={false} />
           ) : (
             <div className="w-full h-full bg-gray-900 flex items-center justify-center">
               <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
@@ -1115,25 +908,11 @@ const MediaItem = React.memo(
               <img
                 src={contentUrl}
                 alt="Preview content"
-                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"
-                  }`}
+                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`}
                 loading="lazy"
                 style={{ transition: "opacity 0.3s ease" }}
                 onLoad={() => setIsLoading(false)}
-                onError={(e) => {
-                  console.error("Image load error:", {
-                    src: e.target.src,
-                    content: content.content,
-                  });
-                  setIsLoading(false);
-                  setError({
-                    message: "Image failed to load",
-                    details: {
-                      code: "N/A",
-                      userAgent: navigator.userAgent,
-                    },
-                  });
-                }}
+                onError={() => { setIsLoading(false); setError({ message: "Image failed to load", details: { code: "N/A", userAgent: navigator.userAgent } }); }}
               />
               {isLoading && (
                 <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-80">
@@ -1143,13 +922,7 @@ const MediaItem = React.memo(
               {error && !isLoading && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-gray-900 p-4 text-center">
                   <p className="text-lg font-semibold">{error.message}</p>
-                  {error.details && (
-                    <p className="text-sm text-gray-400 mt-2">
-                      Error Code: {error.details.code}
-                      <br />
-                      Browser: {error.details.userAgent}
-                    </p>
-                  )}
+                  {error.details && <p className="text-sm text-gray-400 mt-2">Error Code: {error.details.code}<br />Browser: {error.details.userAgent}</p>}
                 </div>
               )}
             </>
@@ -1164,140 +937,100 @@ const MediaItem = React.memo(
   }
 );
 
-
-// Clock Component
-const ClockDisplay = React.memo(
-  ({ position = "top-right", visible = true }) => {
-    const [dateTime, setDateTime] = useState(new Date());
-    const [locationName, setLocationName] = useState("Your Location");
-    const [userTimeZone, setUserTimeZone] = useState(
-      Intl.DateTimeFormat().resolvedOptions().timeZone
-    );
-
-    useEffect(() => {
-      const fetchLocationTimeZone = async () => {
-        try {
-          const position = await getCurrentPosition();
-          if (position) {
-            const res = await axios.get(
-              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${position.latitude},${position.longitude}&aqi=no`
-            );
-            const { location: weatherLocation } = res.data;
-            setLocationName(
-              `${weatherLocation.name}, ${weatherLocation.region}`
-            );
-            setUserTimeZone(weatherLocation.tz_id);
-          } else {
-            const res = await axios.get(
-              `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=auto:ip&aqi=no`
-            );
-            const { location } = res.data;
-            setLocationName(`${location.name}, ${location.region} (IP-based)`);
-            setUserTimeZone(location.tz_id);
-          }
-        } catch (error) {
-          console.error(
-            "Failed to fetch location from WeatherAPI:",
-            error.message
-          );
-          setLocationName("Your Location");
-        }
-      };
-
-      if (weatherApiKey) {
-        fetchLocationTimeZone();
-      }
-    }, []);
-
-    useEffect(() => {
-      const timer = setInterval(() => setDateTime(new Date()), 1000);
-      return () => clearInterval(timer);
-    }, []);
-
-    if (!visible) return null;
-
-    const positionClasses = {
-      "top-left": "top-4 left-4",
-      "top-right": "top-4 right-4",
-      "bottom-left": "bottom-4 left-4",
-      "bottom-right": "bottom-4 right-4",
-    };
-
+// ─── DisplayUnit renderer ──────────────────────────────────────────────────────
+// Wraps either a WebpSlideGroup (for converted docs) or a MediaItem (everything else)
+const DisplayUnitRenderer = React.memo(
+  ({ unit, isPaused, setProgress, getContentUrl, isWebpageUrl, videoRefs, unitIndex }) => {
+    if (unit.type === "group") {
+      return (
+        <WebpSlideGroup
+          slides={unit.slides}
+          time={unit.time}
+          isPaused={isPaused}
+          getContentUrl={getContentUrl}
+        />
+      );
+    }
     return (
-      <div
-        className={`absolute ${positionClasses[position] || "top-4 right-4"
-          } flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
-      >
-        <Clock className="w-6 h-6 text-yellow-400" />
-        <div className="text-right">
-          <p className="text-sm font-medium opacity-80">
-            {dateTime
-              .toLocaleDateString("en-IN", {
-                weekday: "short",
-                day: "2-digit",
-                month: "short",
-                year: "numeric",
-                timeZone: userTimeZone,
-              })
-              .toUpperCase()}
-          </p>
-          <p className="text-xl font-bold tracking-wider">
-            {dateTime.toLocaleTimeString("en-IN", {
-              hour: "2-digit",
-              minute: "2-digit",
-              hour12: true,
-              timeZone: userTimeZone,
-            })}
-          </p>
-        </div>
-      </div>
+      <MediaItem
+        content={unit}
+        index={unitIndex}
+        isPaused={isPaused}
+        setProgress={setProgress}
+        getContentUrl={getContentUrl}
+        isWebpageUrl={isWebpageUrl}
+        videoRefs={videoRefs}
+      />
     );
   }
 );
 
-// Helper function to get accurate geolocation
-const getCurrentPosition = () => {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) {
-      console.warn("Geolocation is not supported by this browser");
-      resolve(null);
-      return;
-    }
+// Clock Component
+const ClockDisplay = React.memo(({ position = "top-right", visible = true }) => {
+  const [dateTime, setDateTime] = useState(new Date());
+  const [locationName, setLocationName] = useState("Your Location");
+  const [userTimeZone, setUserTimeZone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone);
 
-    const options = {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 300000,
+  useEffect(() => {
+    const fetchLocationTimeZone = async () => {
+      try {
+        const pos = await getCurrentPosition();
+        const q = pos ? `${pos.latitude},${pos.longitude}` : "auto:ip";
+        const res = await axios.get(`https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${q}&aqi=no`);
+        const { location: wl } = res.data;
+        setLocationName(`${wl.name}, ${wl.region}${pos ? "" : " (IP-based)"}`);
+        setUserTimeZone(wl.tz_id);
+      } catch (error) {
+        console.error("Failed to fetch location from WeatherAPI:", error.message);
+      }
     };
+    if (weatherApiKey) fetchLocationTimeZone();
+  }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => setDateTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (!visible) return null;
+
+  const positionClasses = { "top-left": "top-4 left-4", "top-right": "top-4 right-4", "bottom-left": "bottom-4 left-4", "bottom-right": "bottom-4 right-4" };
+
+  return (
+    <div className={`absolute ${positionClasses[position] || "top-4 right-4"} flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}>
+      <Clock className="w-6 h-6 text-yellow-400" />
+      <div className="text-right">
+        <p className="text-sm font-medium opacity-80">
+          {dateTime.toLocaleDateString("en-IN", { weekday: "short", day: "2-digit", month: "short", year: "numeric", timeZone: userTimeZone }).toUpperCase()}
+        </p>
+        <p className="text-xl font-bold tracking-wider">
+          {dateTime.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: userTimeZone })}
+        </p>
+      </div>
+    </div>
+  );
+});
+
+const getCurrentPosition = () =>
+  new Promise((resolve) => {
+    if (!navigator.geolocation) { resolve(null); return; }
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        console.log("Geolocation success:", {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        });
-      },
-      (error) => {
-        console.warn("Geolocation error:", error.message);
-        resolve(null);
-      },
-      options
+      (p) => resolve({ latitude: p.coords.latitude, longitude: p.coords.longitude, accuracy: p.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 300000 }
     );
   });
-};
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Preview Component
+// ─────────────────────────────────────────────────────────────────────────────
 const Preview = () => {
   const { url } = useParams();
   const mediaItems = useSelector((state) => state.media.mediaItems);
   const [mediaContent, setMediaContent] = useState([]);
+  const [displayUnits, setDisplayUnits] = useState([]); // ← NEW: flattened display units
   const [isEnabled, setIsEnabled] = useState(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentUnitIndex, setCurrentUnitIndex] = useState(0); // ← index into displayUnits
   const [isPaused, setIsPaused] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [progress, setProgress] = useState(0);
@@ -1315,36 +1048,23 @@ const Preview = () => {
   const [allContent, setAllContent] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [settings, setSettings] = useState(defaultSettings);
-  const [isSessionActive, setIsSessionActive] = useState(true); // NEW: Persistent flag to prevent reconnection after replacement
+  const [isSessionActive, setIsSessionActive] = useState(true);
   const controlTimeoutRef = useRef(null);
   const socketRef = useRef(null);
   const pollingRef = useRef(null);
   const lastFetchRef = useRef(0);
 
   const resetControlTimeout = useCallback(() => {
-    if (controlTimeoutRef.current) {
-      clearTimeout(controlTimeoutRef.current);
-    }
+    if (controlTimeoutRef.current) clearTimeout(controlTimeoutRef.current);
     setShowControls(true);
-    controlTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
-    }, 5000);
+    controlTimeoutRef.current = setTimeout(() => setShowControls(false), 5000);
   }, []);
 
   const togglePlayPause = useCallback(() => {
     setIsPaused((prev) => {
-      console.log(`Toggling slideshow to ${!prev ? "paused" : "playing"}`);
       const newPausedState = !prev;
       Object.values(videoRefs.current).forEach((video) => {
-        if (video) {
-          if (newPausedState) {
-            video.pause();
-          } else {
-            video.play().catch((err) => {
-              console.error("Error playing video:", err);
-            });
-          }
-        }
+        if (video) { if (newPausedState) video.pause(); else video.play().catch(console.error); }
       });
       return newPausedState;
     });
@@ -1357,9 +1077,7 @@ const Preview = () => {
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
-    return `${hours.toString().padStart(2, "0")}:${minutes
-      .toString()
-      .padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
   }, []);
 
   const formatDescription = useCallback((description) => {
@@ -1368,1157 +1086,404 @@ const Preview = () => {
   }, []);
 
   const isTimeWindowActive = useCallback((timeWindow) => {
-    if (!timeWindow || !timeWindow.startTime || !timeWindow.endTime) {
-      console.warn(
-        "Invalid time window, treated as always active:",
-        timeWindow
-      );
-      return true;
-    }
-
+    if (!timeWindow || !timeWindow.startTime || !timeWindow.endTime) return true;
     const timeFormat = /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/;
-    if (
-      !timeFormat.test(timeWindow.startTime) ||
-      !timeFormat.test(timeWindow.endTime)
-    ) {
-      console.error("Malformed time format, skipping:", timeWindow);
-      return false;
-    }
-
+    if (!timeFormat.test(timeWindow.startTime) || !timeFormat.test(timeWindow.endTime)) return false;
     const now = new Date();
     const nowTime = now.getHours() * 60 + now.getMinutes();
-    const startTimeParts = timeWindow.startTime.split(":");
-    const endTimeParts = timeWindow.endTime.split(":");
-    const startMinutes =
-      parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
-    const endMinutes =
-      parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
-
-    return nowTime >= startMinutes && nowTime <= endMinutes;
+    const [sh, sm] = timeWindow.startTime.split(":").map(Number);
+    const [eh, em] = timeWindow.endTime.split(":").map(Number);
+    return nowTime >= sh * 60 + sm && nowTime <= eh * 60 + em;
   }, []);
 
-  const isScheduledNow = useCallback(
-    (schedule) => {
-      if (!schedule || Object.keys(schedule).length === 0) {
-        console.log("No schedule provided, content is always active");
-        return true;
-      }
-
-      if (
-        !schedule.startTime &&
-        !schedule.endTime &&
-        !schedule.startDate &&
-        !schedule.endDate &&
-        (!schedule.timeWindows || schedule.timeWindows.length === 0)
-      ) {
-        console.log("No scheduling restrictions, content is always active");
-        return true;
-      }
-
-      const now = new Date();
-      const today = now.toISOString().split("T")[0];
-
-      let isWithinDate = true;
-      if (schedule.startDate) {
-        const startDate = schedule.startDate.split("T")[0];
-        isWithinDate = today >= startDate;
-      }
-      if (schedule.endDate) {
-        const endDate = schedule.endDate.split("T")[0];
-        isWithinDate = isWithinDate && today <= endDate;
-      }
-
-      if (!isWithinDate) {
-        console.log("Content outside date range:", {
-          today,
-          startDate: schedule.startDate,
-          endDate: schedule.endDate,
-        });
-        return false;
-      }
-
-      let isWithinTimeWindow = false;
-      if (schedule.timeWindows && schedule.timeWindows.length > 0) {
-        isWithinTimeWindow = schedule.timeWindows.some((timeWindow) => {
-          const isActive = isTimeWindowActive(timeWindow);
-          return isActive;
-        });
-      } else if (schedule.startTime && schedule.endTime) {
-        const nowTime = now.getHours() * 60 + now.getMinutes();
-        const startTimeParts = schedule.startTime.split(":");
-        const endTimeParts = schedule.endTime.split(":");
-        const startMinutes =
-          parseInt(startTimeParts[0]) * 60 + parseInt(startTimeParts[1]);
-        const endMinutes =
-          parseInt(endTimeParts[0]) * 60 + parseInt(endTimeParts[1]);
-        isWithinTimeWindow = nowTime >= startMinutes && nowTime <= endMinutes;
-        console.log("Legacy time check:", {
-          startTime: schedule.startTime,
-          endTime: schedule.endTime,
-          isWithinTimeWindow,
-        });
-      } else {
-        isWithinTimeWindow = true;
-      }
-
-      return isWithinDate && isWithinTimeWindow;
-    },
-    [isTimeWindowActive]
-  );
+  const isScheduledNow = useCallback((schedule) => {
+    if (!schedule || Object.keys(schedule).length === 0) return true;
+    if (!schedule.startTime && !schedule.endTime && !schedule.startDate && !schedule.endDate && (!schedule.timeWindows || schedule.timeWindows.length === 0)) return true;
+    const now = new Date();
+    const today = now.toISOString().split("T")[0];
+    let isWithinDate = true;
+    if (schedule.startDate) isWithinDate = today >= schedule.startDate.split("T")[0];
+    if (schedule.endDate) isWithinDate = isWithinDate && today <= schedule.endDate.split("T")[0];
+    if (!isWithinDate) return false;
+    if (schedule.timeWindows && schedule.timeWindows.length > 0) return schedule.timeWindows.some((tw) => isTimeWindowActive(tw));
+    if (schedule.startTime && schedule.endTime) {
+      const nowTime = now.getHours() * 60 + now.getMinutes();
+      const [sh, sm] = schedule.startTime.split(":").map(Number);
+      const [eh, em] = schedule.endTime.split(":").map(Number);
+      return nowTime >= sh * 60 + sm && nowTime <= eh * 60 + em;
+    }
+    return true;
+  }, [isTimeWindowActive]);
 
   const groupMediaByLayout = useCallback((content) => {
     const groupedContent = {};
     (content || []).forEach((item, index) => {
       const layoutKey = item?.layout || "single";
-      if (!groupedContent[layoutKey]) {
-        groupedContent[layoutKey] = [];
-      }
+      if (!groupedContent[layoutKey]) groupedContent[layoutKey] = [];
       groupedContent[layoutKey].push({ ...item, originalIndex: index });
     });
     return groupedContent;
   }, []);
 
-  const getActiveContent = useCallback(
-    (content) => {
-      if (!Array.isArray(content)) {
-        console.warn("Invalid content array, returning empty:", content);
-        return [];
+  const getActiveContent = useCallback((content) => {
+    if (!Array.isArray(content)) return [];
+    const priorityOrder = { high: 3, medium: 2, low: 1 };
+    const exclusiveHigh = content.filter((item) => item?.schedule && isScheduledNow(item.schedule) && item.schedule.displayMode === "exclusive" && item.schedule.priority === "high");
+    if (exclusiveHigh.length > 0) return exclusiveHigh.sort((a, b) => (priorityOrder[b.schedule?.priority || "low"] || 0) - (priorityOrder[a.schedule?.priority || "low"] || 0));
+    return content.filter((item) => item?.schedule && isScheduledNow(item.schedule))
+      .sort((a, b) => (priorityOrder[b.schedule?.priority || "low"] || 0) - (priorityOrder[a.schedule?.priority || "low"] || 0));
+  }, [isScheduledNow]);
+
+  const getContentUrl = useCallback((content) => {
+    if (!content) return "";
+    const prefix = "/api/upload/preview/";
+    let baseUrl;
+    if (content.startsWith(prefix)) {
+      baseUrl = content.slice(prefix.length);
+    } else if (isYouTubeUrl(content)) {
+      return getYouTubeEmbedUrl(content);
+    } else {
+      baseUrl = content.startsWith("http") ? content : `${apiBaseUrl}/${content}`;
+    }
+    if (baseUrl.includes(apiBaseUrl)) baseUrl = baseUrl.replace(/([^:]\/)\/+/g, "$1");
+    const separator = baseUrl.includes("?") ? "&" : "?";
+    const cacheBuster = content.endsWith(".webp") || content.endsWith(".pdf") ? "" : `v=${Date.now()}`;
+    return cacheBuster ? `${baseUrl}${separator}${cacheBuster}` : `${baseUrl}${separator}`;
+  }, [url]);
+
+  const preloadMedia = useCallback((content) => {
+    (content || []).slice(0, 3).forEach((item) => {
+      if (item?.content) {
+        const u = getContentUrl(item.content);
+        const link = document.createElement("link");
+        link.rel = "preload";
+        link.href = u;
+        link.as = videoExtensions.some((v) => item.content.toLowerCase().endsWith(v.ext)) ? "video" : item.content.endsWith(".pdf") ? "fetch" : "image";
+        link.onerror = () => console.error(`Preload failed: ${u}`);
+        document.head.appendChild(link);
       }
-
-      const priorityOrder = { high: 3, medium: 2, low: 1 };
-
-      const exclusiveHighPriorityContent = content.filter(
-        (item) =>
-          item?.schedule &&
-          isScheduledNow(item.schedule) &&
-          item.schedule.displayMode === "exclusive" &&
-          item.schedule.priority === "high"
-      );
-
-      if (exclusiveHighPriorityContent.length > 0) {
-        exclusiveHighPriorityContent.forEach((item) => {
-          if (
-            (!item.schedule.timeWindows ||
-              item.schedule.timeWindows.every(
-                (tw) => !tw.startTime || !tw.endTime
-              )) &&
-            !item.schedule.startDate &&
-            !item.schedule.endDate &&
-            !item.schedule.startTime &&
-            !item.schedule.endTime
-          ) {
-            console.warn(
-              "Exclusive high-priority content has no time restrictions, may override others:",
-              item
-            );
-          }
-        });
-        console.log(
-          "Exclusive high-priority content active:",
-          exclusiveHighPriorityContent
-        );
-        return exclusiveHighPriorityContent.sort((a, b) => {
-          const priorityA = priorityOrder[a.schedule?.priority || "low"] || 0;
-          const priorityB = priorityOrder[b.schedule?.priority || "low"] || 0;
-          return priorityB - priorityA;
-        });
-      }
-
-      const activeContent = content.filter(
-        (item) => item?.schedule && isScheduledNow(item.schedule)
-      );
-
-      return activeContent.sort((a, b) => {
-        const priorityA = priorityOrder[a.schedule?.priority || "low"] || 0;
-        const priorityB = priorityOrder[b.schedule?.priority || "low"] || 0;
-        return priorityB - priorityA;
-      });
-    },
-    [isScheduledNow]
-  );
-
-  // const stableCacheBuster = useMemo(() => Date.now(), []);
-
-  const getContentUrl = useCallback(
-    (content) => {
-      if (!content) return "";
-
-      const prefix = "/api/upload/preview/";
-      let baseUrl;
-
-      if (content.startsWith(prefix)) {
-        baseUrl = content.slice(prefix.length);
-      } else if (isYouTubeUrl(content)) {
-        return getYouTubeEmbedUrl(content);
-      } else {
-        baseUrl = content.startsWith("http")
-          ? content
-          : `${apiBaseUrl}/${content}`;
-      }
-
-      // IMPORTANT: Normalize path (fix double slashes consistently)
-      if (baseUrl.includes(apiBaseUrl)) {
-        // It's a full URL with apiBaseUrl - normalize it
-        baseUrl = baseUrl.replace(/([^:]\/)\/+/g, '$1'); // Remove duplicate slashes except after protocol
-      }
-
-      const separator = baseUrl.includes("?") ? "&" : "?";
-
-      // Add cache buster only for non-PDF files or initial load
-      const cacheBuster = content.endsWith('.pdf') ? '' : `v=${Date.now()}`;
-      return cacheBuster ? `${baseUrl}${separator}${cacheBuster}` : `${baseUrl}${separator}`;
-    },
-    [url]
-  );
-
-  const preloadMedia = useCallback(
-    (content) => {
-      (content || []).slice(0, 3).forEach((item) => {
-        if (item?.content) {
-          const url = getContentUrl(item.content);
-          const link = document.createElement("link");
-          link.rel = "preload";
-          link.href = url;
-          link.as = videoExtensions.some((video) =>
-            item.content.toLowerCase().endsWith(video.ext)
-          )
-            ? "video"
-            : item.content.endsWith(".pdf")
-              ? "fetch"
-              : "image";
-          link.onerror = () =>
-            console.error(`Wait Your Content Is Loading ${url}`);
-          document.head.appendChild(link);
-        }
-      });
-    },
-    [getContentUrl]
-  );
+    });
+  }, [getContentUrl]);
 
   const fetchWeather = useCallback(async (location = "Ohio") => {
-    if (!weatherApiKey) {
-      console.error("Weather API key is missing.");
-      return;
-    }
-
+    if (!weatherApiKey) return;
     const now = Date.now();
-    if (
-      cache.weather.data &&
-      cache.weather.timestamp &&
-      now - cache.weather.timestamp < cache.weather.ttl
-    ) {
-      setWeather(cache.weather.data);
-      return;
-    }
-
+    if (cache.weather.data && cache.weather.timestamp && now - cache.weather.timestamp < cache.weather.ttl) { setWeather(cache.weather.data); return; }
     try {
       let weatherLocation = location;
       if (location === "auto" || location === "Ohio") {
         const position = await getCurrentPosition();
-        if (position) {
-          weatherLocation = `${position.latitude},${position.longitude}`;
-          console.log(
-            "Using accurate coordinates for weather:",
-            weatherLocation
-          );
-        } else {
-          weatherLocation = "auto:ip";
-          console.log("Falling back to IP-based location for weather");
-        }
+        weatherLocation = position ? `${position.latitude},${position.longitude}` : "auto:ip";
       }
-
-      const url = `https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${weatherLocation}&aqi=no`;
-      const response = await axios.get(url, { timeout: 8000 });
-      cache.weather.data = response.data;
-      cache.weather.timestamp = now;
-      setWeather(response.data);
-    } catch (error) {
-      console.error("Error fetching weather:", error);
-    }
+      const res = await axios.get(`https://api.weatherapi.com/v1/current.json?key=${weatherApiKey}&q=${weatherLocation}&aqi=no`, { timeout: 8000 });
+      cache.weather.data = res.data; cache.weather.timestamp = now;
+      setWeather(res.data);
+    } catch (error) { console.error("Error fetching weather:", error); }
   }, []);
 
   const getUserLocation = useCallback(() => {
     getCurrentPosition().then((position) => {
-      if (position) {
-        fetchWeather(`${position.latitude},${position.longitude}`);
-      } else {
-        console.log("Using IP-based location as fallback");
-        fetchWeather("auto:ip");
-      }
+      fetchWeather(position ? `${position.latitude},${position.longitude}` : "auto:ip");
     });
   }, [fetchWeather]);
 
-  // const fetchNews = useCallback(async () => {
-  //   const now = Date.now();
-  //   if (
-  //     cache.news.data &&
-  //     cache.news.timestamp &&
-  //     now - cache.news.timestamp < cache.news.ttl
-  //   ) {
-  //     setNews(cache.news.data);
-  //     return;
-  //   }
-  //   try {
-  //     const feeds = [
-  //       "https://rss.cnn.com/rss/edition.rss",
-  //       "https://feeds.nbcnews.com/nbcnews/public/news",
-  //       "https://feeds.washingtonpost.com/rss/national",
-  //       "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-  //       "https://feeds.reuters.com/reuters/topNews",
-  //       "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
-  //       "https://feeds.abcnews.go.com/abcnews/topstories",
-  //       "https://feeds.foxnews.com/foxnews/latest",
-  //     ];
-  //     const responses = await Promise.all(
-  //       feeds.map((feed) =>
-  //         axios
-  //           .get(
-  //             `${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(
-  //               feed
-  //             )}`,
-  //             { timeout: 5000 }
-  //           )
-  //           .then((res) => res.data.items || [])
-  //           .catch(() => [])
-  //       )
-  //     );
-  //     const rssArticles = responses.flat().slice(0, 8);
-  //     let articles = rssArticles;
-  //     if (rssArticles.length === 0 && newsApiKey) {
-  //       const fallbackResponse = await axios.get(
-  //         `https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`,
-  //         { timeout: 5000 }
-  //       );
-  //       articles = fallbackResponse.data.articles.slice(0, 8);
-  //     }
-  //     cache.news.data = articles;
-  //     cache.news.timestamp = now;
-  //     setNews(articles);
-  //   } catch (error) {
-  //     console.error("Error fetching news:", error);
-  //     setNews([]);
-  //   }
-  // }, []);
-
   const rssFeedOptions = [
-    // 🌍 International
     { value: "cnn", label: "CNN", url: "https://rss.cnn.com/rss/edition.rss" },
-    {
-      value: "nbc",
-      label: "NBC News",
-      url: "https://feeds.nbcnews.com/nbcnews/public/news",
-    },
-    {
-      value: "nytimes",
-      label: "The New York Times",
-      url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml",
-    },
-    {
-      value: "bbc",
-      label: "BBC News",
-      url: "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml",
-    },
-    {
-      value: "fox",
-      label: "Fox News",
-      url: "https://feeds.foxnews.com/foxnews/latest",
-    },
-
-    // 🇮🇳 Indian Top Media
-    {
-      value: "ndtv",
-      label: "NDTV",
-      url: "https://feeds.feedburner.com/ndtvnews-top-stories",
-    },
-    {
-      value: "indiatoday",
-      label: "India Today",
-      url: "https://www.indiatoday.in/rss/1206514",
-    },
-    {
-      value: "indiatv",
-      label: "India TV News",
-      url: "https://www.indiatvnews.com/rssfeed/topstory.xml",
-    },
-    {
-      value: "zeenews",
-      label: "Zee News",
-      url: "https://zeenews.india.com/rss/india-national-news.xml",
-    },
-    {
-      value: "dna",
-      label: "DNA India",
-      url: "https://www.dnaindia.com/feeds/india.xml",
-    },
-
-    // 💼 Business & Finance
-    {
-      value: "moneycontrol",
-      label: "Moneycontrol",
-      url: "https://www.moneycontrol.com/rss/latestnews.xml",
-    },
+    { value: "nbc", label: "NBC News", url: "https://feeds.nbcnews.com/nbcnews/public/news" },
+    { value: "nytimes", label: "The New York Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml" },
+    { value: "bbc", label: "BBC News", url: "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml" },
+    { value: "fox", label: "Fox News", url: "https://feeds.foxnews.com/foxnews/latest" },
+    { value: "ndtv", label: "NDTV", url: "https://feeds.feedburner.com/ndtvnews-top-stories" },
+    { value: "indiatoday", label: "India Today", url: "https://www.indiatoday.in/rss/1206514" },
+    { value: "indiatv", label: "India TV News", url: "https://www.indiatvnews.com/rssfeed/topstory.xml" },
+    { value: "zeenews", label: "Zee News", url: "https://zeenews.india.com/rss/india-national-news.xml" },
+    { value: "dna", label: "DNA India", url: "https://www.dnaindia.com/feeds/india.xml" },
+    { value: "moneycontrol", label: "Moneycontrol", url: "https://www.moneycontrol.com/rss/latestnews.xml" },
   ];
-
-  // const fetchNews = useCallback(async () => {
-  //   const now = Date.now();
-  //   if (
-  //     cache.news.data &&
-  //     cache.news.timestamp &&
-  //     now - cache.news.timestamp < cache.news.ttl
-  //   ) {
-  //     setNews(cache.news.data);
-  //     return;
-  //   }
-  //   try {
-  //     // Use the RSS feed from settings, fallback to CNN if not set
-  //     const rssFeedValue = settings.ticker.rssFeed;
-  //     const rssFeed = rssFeedOptions.find((option) => option.value === rssFeedValue);
-  //     const feedUrl = rssFeed.url ;
-
-  //     const response = await axios.get(
-  //       `${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feedUrl)}`,
-  //       { timeout: 5000 }
-  //     );
-  //     let articles = response.data.items || [];
-
-  //     if (articles.length === 0 && newsApiKey) {
-  //       const fallbackResponse = await axios.get(
-  //         `https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`,
-  //         { timeout: 5000 }
-  //       );
-  //       articles = fallbackResponse.data.articles.slice(0, 8);
-  //     }
-
-  //     cache.news.data = articles;
-  //     cache.news.timestamp = now;
-  //     setNews(articles);
-  //   } catch (error) {
-  //     console.error("Error fetching news:", error);
-  //     setNews([]);
-  //   }
-  // }, [settings.ticker.rssFeed, newsApiKey]);
 
   const fetchNews = useCallback(async () => {
     const now = Date.now();
-    if (
-      cache.news.data &&
-      cache.news.timestamp &&
-      now - cache.news.timestamp < cache.news.ttl
-    ) {
-      setNews(cache.news.data);
-      return;
-    }
-
+    if (cache.news.data && cache.news.timestamp && now - cache.news.timestamp < cache.news.ttl) { setNews(cache.news.data); return; }
     try {
-      // FIX: Properly access the RSS feed from settings
       const rssFeedValue = settings?.ticker?.rssFeed;
-      console.log("RSS Feed setting:", rssFeedValue, "Full settings:", settings);
+      const rssFeedValues = Array.isArray(rssFeedValue) ? rssFeedValue : rssFeedValue ? [rssFeedValue] : ["nbc"];
+      const feedUrls = rssFeedValues.map((v) => rssFeedOptions.find((o) => o.value === v)?.url).filter(Boolean);
+      if (feedUrls.length === 0) feedUrls.push("https://feeds.nbcnews.com/nbcnews/public/news");
 
-      // Ensure rssFeed is an array and handle the value properly
-      const rssFeedValues = Array.isArray(rssFeedValue)
-        ? rssFeedValue
-        : rssFeedValue
-          ? [rssFeedValue]
-          : ["nbc"]; // Default fallback
+      const responses = await Promise.all(feedUrls.map((feedUrl) =>
+        axios.get(`${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(feedUrl)}`, { timeout: 5000 })
+          .catch(() => ({ data: { items: [] } }))
+      ));
 
-      console.log("Processing RSS feed values:", rssFeedValues);
-
-      const feedUrls = rssFeedValues
-        .map((value) => {
-          const feed = rssFeedOptions.find((option) => option.value === value);
-          if (!feed) {
-            console.warn(`No RSS feed found for value: ${value}`);
-            return null;
-          }
-          return feed.url;
-        })
-        .filter((url) => url);
-
-      console.log("Final feed URLs:", feedUrls);
-
-      // Rest of your existing code...
-      if (feedUrls.length === 0) {
-        console.warn("No valid RSS feed URLs found. Using default.");
-        feedUrls.push("https://feeds.nbcnews.com/nbcnews/public/news");
-      }
-
-      const responses = await Promise.all(
-        feedUrls.map(async (feedUrl) => {
-          try {
-            return await axios.get(
-              `${apiBaseUrl}/api/upload/parse-rss?url=${encodeURIComponent(
-                feedUrl
-              )}`,
-              { timeout: 5000 }
-            );
-          } catch (error) {
-            console.error(`Failed to fetch RSS feed ${feedUrl}:`, error.message);
-            return { data: { items: [] } };
-          }
-        })
-      );
-
-      let articles = [];
-      responses.forEach((response) => {
-        if (response.data.items) {
-          articles = articles.concat(
-            response.data.items.map((item) => ({
-              title: item.title,
-              link: item.url,
-              pubDate: item.publishedAt,
-              description: item.description,
-              source: item.source,
-            }))
-          );
-        }
-      });
-
-      // Remove duplicates
       const seen = new Set();
-      articles = articles.filter((article) => {
-        const key = article.title || article.link;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+      let articles = responses.flatMap((r) => (r.data.items || []).map((item) => ({
+        title: item.title, link: item.url, pubDate: item.publishedAt, description: item.description, source: item.source,
+      }))).filter(({ title, link }) => { const k = title || link; if (seen.has(k)) return false; seen.add(k); return true; })
+        .sort((a, b) => new Date(b.pubDate || 0) - new Date(a.pubDate || 0)).slice(0, 20);
 
-      // Sort and limit articles
-      articles = articles
-        .sort((a, b) => {
-          const dateA = a.pubDate ? new Date(a.pubDate) : new Date();
-          const dateB = b.pubDate ? new Date(b.pubDate) : new Date();
-          return dateB - dateA;
-        })
-        .slice(0, 20);
-
-      // Fallback to news API if no articles are found
       if (articles.length === 0 && newsApiKey) {
-        const fallbackResponse = await axios.get(
-          `https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`,
-          { timeout: 5000 }
-        );
-        articles = fallbackResponse.data.articles
-          .slice(0, 8)
-          .map((article) => ({
-            title: article.title,
-            link: article.url,
-            pubDate: article.publishedAt,
-            description: article.description,
-            source: article.source.name,
-          }));
+        const fb = await axios.get(`https://gnews.io/api/v4/top-headlines?country=in&token=${newsApiKey}`, { timeout: 5000 });
+        articles = fb.data.articles.slice(0, 8).map((a) => ({ title: a.title, link: a.url, pubDate: a.publishedAt, description: a.description, source: a.source.name }));
       }
 
-      cache.news.data = articles;
-      cache.news.timestamp = now;
+      cache.news.data = articles; cache.news.timestamp = now;
       setNews(articles);
-    } catch (error) {
-      console.error("Error fetching news:", error);
-      setNews([]);
+    } catch (error) { console.error("Error fetching news:", error); setNews([]); }
+  }, [settings?.ticker?.rssFeed, newsApiKey]);
+
+  // ── Apply new content → derive displayUnits ────────────────────────────────
+  const applyContent = useCallback((activeContent) => {
+    setMediaContent(activeContent);
+    const units = buildDisplayUnits(activeContent);
+    setDisplayUnits(units);
+    if (units.length > 0) {
+      setCurrentUnitIndex(0);
+      setCurrentLayout(units[0].layout || "single");
+    } else {
+      setVisibleItems([fallbackItem]);
     }
-  }, [settings?.ticker?.rssFeed, newsApiKey]); // FIX: Use optional chaining in dependencies
-  const updateVisibleItems = useCallback(
-    (layout, groupedContent, index) => {
-      const layoutConfig =
-        layoutOptions.find((option) => option.id === layout) ||
-        layoutOptions[0];
-      const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-      const allItems =
-        mediaContent.length > 0
-          ? mediaContent.map((item, idx) => ({ ...item, originalIndex: idx }))
-          : [fallbackItem];
+    preloadMedia(activeContent);
+  }, [preloadMedia]);
 
-      if (index >= allItems.length || index < 0) {
-        console.warn("Index out of bounds, using fallback", {
-          index,
-          total: allItems.length,
-        });
-        setVisibleItems([fallbackItem]);
-        return;
+  // ── Visible items for the current display unit (layout support) ────────────
+  useEffect(() => {
+    if (displayUnits.length === 0) { setVisibleItems([fallbackItem]); return; }
+    const idx = currentUnitIndex % displayUnits.length;
+    const unit = displayUnits[idx];
+    if (!unit) { setVisibleItems([fallbackItem]); return; }
+    setCurrentLayout(unit.layout || "single");
+
+    const layoutConfig = layoutOptions.find((o) => o.id === (unit.layout || "single")) || layoutOptions[0];
+    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+
+    // For groups, show just the group unit. For singles, collect up to itemsPerPage.
+    if (unit.type === "group") {
+      setVisibleItems([unit]);
+    } else {
+      // Find contiguous single units from this index
+      const singles = [];
+      for (let j = idx; j < Math.min(idx + itemsPerPage, displayUnits.length); j++) {
+        if (displayUnits[j].type === "single") singles.push(displayUnits[j]);
+        else break;
       }
-
-      const currentItem = allItems[index] || fallbackItem;
-      const currentLayout = currentItem.layout || "single";
-      setCurrentLayout(currentLayout);
-
-      if (currentLayout !== layout) {
-        setCurrentLayout(currentLayout);
-      }
-
-      const start = index;
-      const end = Math.min(start + itemsPerPage, allItems.length);
-      const itemsToDisplay = allItems.slice(start, end);
-      setVisibleItems(
-        itemsToDisplay.length > 0 ? itemsToDisplay : [fallbackItem]
-      );
-    },
-    [mediaContent]
-  );
+      setVisibleItems(singles.length > 0 ? singles : [fallbackItem]);
+    }
+  }, [displayUnits, currentUnitIndex]);
 
   const isWebpageUrl = useCallback((url) => {
     if (!url) return false;
-    const excludedExtensions = [
-      ...videoExtensions.map((video) => video.ext),
-      ".pdf",
-      ".jpg",
-      ".jpeg",
-      ".png",
-      ".gif",
-    ];
-    const hasExcludedExtension = excludedExtensions.some((ext) =>
-      url.toLowerCase().endsWith(ext)
-    );
-    const isSpecialUrl = isPowerBIUrl(url) || isYouTubeLiveUrl(url);
-    return (
-      (url.startsWith("http://") || url.startsWith("https://")) &&
-      !isSpecialUrl &&
-      !hasExcludedExtension
-    );
+    const excluded = [...videoExtensions.map((v) => v.ext), ".pdf", ".jpg", ".jpeg", ".png", ".gif", ".webp"];
+    return (url.startsWith("http://") || url.startsWith("https://")) && !isPowerBIUrl(url) && !isYouTubeLiveUrl(url) && !excluded.some((ext) => url.toLowerCase().endsWith(ext));
   }, []);
 
   const getGridClasses = useCallback(() => {
     switch (currentLayout) {
-      case "2x1":
-        return "grid-cols-2 grid-rows-1";
-      case "1x2":
-        return "grid-cols-1 grid-rows-2";
-      case "2x2":
-        return "grid-cols-2 grid-rows-2";
-      case "3x1":
-        return "grid-cols-3 grid-rows-1";
-      case "1x3":
-        return "grid-cols-1 grid-rows-3";
-      case "single":
-      default:
-        return "grid-cols-1 grid-rows-1";
+      case "2x1": return "grid-cols-2 grid-rows-1";
+      case "1x2": return "grid-cols-1 grid-rows-2";
+      case "2x2": return "grid-cols-2 grid-rows-2";
+      case "3x1": return "grid-cols-3 grid-rows-1";
+      case "1x3": return "grid-cols-1 grid-rows-3";
+      default: return "grid-cols-1 grid-rows-1";
     }
   }, [currentLayout]);
 
-  const isAnyPowerBIContent = useCallback(() => {
-    return visibleItems.some(
-      (item) => item?.content && isPowerBIUrl(item.content)
-    );
-  }, [visibleItems]);
+  const isAnyPowerBIContent = useCallback(() => visibleItems.some((item) => item?.content && isPowerBIUrl(item.content)), [visibleItems]);
 
   const goNext = useCallback(() => {
-    const currentItem = mediaContent[currentIndex] || fallbackItem;
-    const layoutConfig =
-      layoutOptions.find(
-        (option) => option.id === (currentItem.layout || "single")
-      ) || layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const nextIndex = currentIndex + itemsPerPage;
-    const groupedContent = groupMediaByLayout(
-      mediaContent.length > 0 ? mediaContent : [fallbackItem]
-    );
-    if (nextIndex >= mediaContent.length && mediaContent.length > 0) {
-      setCurrentIndex(0);
-      const firstLayout = mediaContent[0]?.layout || "single";
-      setCurrentLayout(firstLayout);
-      updateVisibleItems(firstLayout, groupedContent, 0);
-    } else if (mediaContent.length === 0) {
-      setVisibleItems([fallbackItem]);
-    } else {
-      setCurrentIndex(nextIndex);
-      const nextItem = mediaContent[nextIndex] || fallbackItem;
-      const nextLayout = nextItem.layout || "single";
-      setCurrentLayout(nextLayout);
-      updateVisibleItems(nextLayout, groupedContent, nextIndex);
-    }
+    if (displayUnits.length === 0) return;
+    setCurrentUnitIndex((prev) => (prev + 1) % displayUnits.length);
     setShowControls(true);
     resetControlTimeout();
-  }, [
-    mediaContent,
-    currentIndex,
-    groupMediaByLayout,
-    updateVisibleItems,
-    resetControlTimeout,
-  ]);
+  }, [displayUnits, resetControlTimeout]);
 
   const goPrev = useCallback(() => {
-    const currentItem = mediaContent[currentIndex] || fallbackItem;
-    const layoutConfig =
-      layoutOptions.find(
-        (option) => option.id === (currentItem.layout || "single")
-      ) || layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const prevIndex = Math.max(0, currentIndex - itemsPerPage);
-    const groupedContent = groupMediaByLayout(
-      mediaContent.length > 0 ? mediaContent : [fallbackItem]
-    );
-    setCurrentIndex(prevIndex);
-    const prevItem = mediaContent[prevIndex] || fallbackItem;
-    const prevLayout = prevItem.layout || "single";
-    setCurrentLayout(prevLayout);
-    updateVisibleItems(prevLayout, groupedContent, prevIndex);
+    if (displayUnits.length === 0) return;
+    setCurrentUnitIndex((prev) => (prev - 1 + displayUnits.length) % displayUnits.length);
     setShowControls(true);
     resetControlTimeout();
-  }, [
-    mediaContent,
-    currentIndex,
-    groupMediaByLayout,
-    updateVisibleItems,
-    resetControlTimeout,
-  ]);
+  }, [displayUnits, resetControlTimeout]);
 
-  const fetchData = useCallback(
-    async (source = "unknown") => {
-      const now = Date.now();
-      const minInterval = 60 * 1000;
-      if (now - lastFetchRef.current < minInterval) {
-        console.log(`fetchData throttled (source: ${source})`);
-        return;
-      }
-      lastFetchRef.current = now;
+  const fetchData = useCallback(async (source = "unknown") => {
+    const now = Date.now();
+    const minInterval = 60 * 1000;
+    if (now - lastFetchRef.current < minInterval) { console.log(`fetchData throttled (source: ${source})`); return; }
+    lastFetchRef.current = now;
 
-      // Don't show loading for background fetches
-      const isBackgroundFetch = source === "polling" || source.includes("socket");
-      if (!isBackgroundFetch) {
-        setIsLoading(true);
-      }
+    const isBackgroundFetch = source === "polling" || source.includes("socket");
+    if (!isBackgroundFetch) setIsLoading(true);
 
-      try {
-        const response = await axios.post(
-          `${apiBaseUrl}/api/upload/preview/${url}`,
-          { timeout: 10000 }
-        );
+    try {
+      const response = await axios.post(`${apiBaseUrl}/api/upload/preview/${url}`, { timeout: 10000 });
+      if (response.data) {
+        const content = response.data.url_content || [];
+        const activeContent = getActiveContent(content);
 
-        if (response.data) {
-          const content = response.data.url_content || [];
-          const activeContent = getActiveContent(content);
-
-          // NEW: Create stable content fingerprint (ignore metadata changes)
-          const createFingerprint = (items) =>
-            items.map(item => `${item.content}|${item.layout}|${item.time}`).join('::');
-
-          const newFingerprint = createFingerprint(activeContent);
-          const oldFingerprint = createFingerprint(mediaContent);
-
-          if (newFingerprint === oldFingerprint) {
-            console.log(`📌 Content unchanged (${source}), preserving state`);
-
-            // Only update settings, don't reset anything else
-            setSettings(response.data.settings || defaultSettings);
-            setCustomTicker(response.data.custom_ticker || null);
-
-            if (!isBackgroundFetch) {
-              setIsLoading(false);
-            }
-            return; // EXIT EARLY - Critical!
-          }
-
-          console.log(`🔄 Content changed (${source}), updating...`);
-
-          // Rest of your existing logic...
-          const cacheKey = `preview_${url}`;
-          localStorage.setItem(cacheKey, JSON.stringify(response.data));
-          setAllContent(content);
-          setMediaContent(activeContent);
-
-          if (activeContent.length > 0) {
-            setCurrentIndex(0);
-            const firstLayout = activeContent[0].layout || "single";
-            setCurrentLayout(firstLayout);
-            const groupedContent = groupMediaByLayout(activeContent);
-            updateVisibleItems(firstLayout, groupedContent, 0);
-            preloadMedia(activeContent);
-          } else {
-            setVisibleItems([fallbackItem]);
-          }
-
-          setIsEnabled(response.data.isEnabled === true);
-          setScheduledAt(response.data.scheduledAt ? new Date(response.data.scheduledAt) : null);
-          setExpiresAt(response.data.expiresAt ? new Date(response.data.expiresAt) : null);
-          setCustomTicker(response.data.custom_ticker || null);
+        const createFingerprint = (items) => items.map((item) => `${item.content}|${item.layout}|${item.time}`).join("::");
+        if (createFingerprint(activeContent) === createFingerprint(mediaContent)) {
+          console.log(`Content unchanged (${source}), preserving state`);
           setSettings(response.data.settings || defaultSettings);
+          setCustomTicker(response.data.custom_ticker || null);
+          if (!isBackgroundFetch) setIsLoading(false);
+          return;
         }
-      } catch (error) {
-        console.error(`Error fetching preview content (source: ${source}):`, error);
-      } finally {
-        if (!isBackgroundFetch) {
-          setIsLoading(false);
-        }
-      }
-    },
-    [url, getActiveContent, groupMediaByLayout, preloadMedia, updateVisibleItems, mediaContent]
-  );
 
-  const handleSocketUpdate = useCallback(
-    (data, eventType) => {
-      if (!data || !data.url_content) {
-        console.warn(`Invalid ${eventType} data received:`, data);
-        setVisibleItems([fallbackItem]);
-        return;
+        const cacheKey = `preview_${url}`;
+        localStorage.setItem(cacheKey, JSON.stringify(response.data));
+        setAllContent(content);
+        applyContent(activeContent);
+        setIsEnabled(response.data.isEnabled === true);
+        setScheduledAt(response.data.scheduledAt ? new Date(response.data.scheduledAt) : null);
+        setExpiresAt(response.data.expiresAt ? new Date(response.data.expiresAt) : null);
+        setCustomTicker(response.data.custom_ticker || null);
+        setSettings(response.data.settings || defaultSettings);
       }
+    } catch (error) {
+      console.error(`Error fetching preview content (source: ${source}):`, error);
+    } finally {
+      if (!isBackgroundFetch) setIsLoading(false);
+    }
+  }, [url, getActiveContent, applyContent, mediaContent]);
 
-      const cacheKey = `preview_${url}`;
-      localStorage.setItem(cacheKey, JSON.stringify(data));
-      const content = data.url_content || [];
-      setAllContent(content);
-      const activeContent = getActiveContent(content);
-      if (JSON.stringify(activeContent) === JSON.stringify(mediaContent)) {
-        console.log("No changes, skipping");
-        setIsLoading(false);
-        return;
-      }
+  const handleSocketUpdate = useCallback((data, eventType) => {
+    if (!data || !data.url_content) { setVisibleItems([fallbackItem]); return; }
+    const cacheKey = `preview_${url}`;
+    localStorage.setItem(cacheKey, JSON.stringify(data));
+    const content = data.url_content || [];
+    setAllContent(content);
+    const activeContent = getActiveContent(content);
+    if (JSON.stringify(activeContent) === JSON.stringify(mediaContent)) { setIsLoading(false); return; }
 
-      setMediaContent(activeContent);
-      const isUrlEnabled = data.isEnabled === true;
-      setIsEnabled(isUrlEnabled);
-      setScheduledAt(data.scheduledAt ? new Date(data.scheduledAt) : null);
-      setExpiresAt(data.expiresAt ? new Date(data.expiresAt) : null);
-      setCustomTicker(data.custom_ticker || null);
-      setSettings(data.settings || defaultSettings);
-
-      if (activeContent.length > 0) {
-        setCurrentIndex(0);
-        const firstLayout = activeContent[0].layout || "single";
-        setCurrentLayout(firstLayout);
-        const groupedContent = groupMediaByLayout(activeContent);
-        updateVisibleItems(firstLayout, groupedContent, 0);
-        preloadMedia(activeContent);
-      } else {
-        console.warn(`No active content for ${eventType}, using fallback`);
-        setVisibleItems([fallbackItem]);
-      }
-      setIsLoading(false);
-      console.log(`Processed ${eventType} event:`, activeContent);
-    },
-    [
-      url,
-      getActiveContent,
-      groupMediaByLayout,
-      updateVisibleItems,
-      preloadMedia,
-    ]
-  );
+    applyContent(activeContent);
+    setIsEnabled(data.isEnabled === true);
+    setScheduledAt(data.scheduledAt ? new Date(data.scheduledAt) : null);
+    setExpiresAt(data.expiresAt ? new Date(data.expiresAt) : null);
+    setCustomTicker(data.custom_ticker || null);
+    setSettings(data.settings || defaultSettings);
+    setIsLoading(false);
+  }, [url, getActiveContent, applyContent, mediaContent]);
 
   const connectSocket = useCallback(() => {
-    if (!isSessionActive) {
-      console.log("Session inactive, skipping socket connection");
-      return;
-    }
-
-    if (socketRef.current?.connected) {
-      console.log("Socket already connected, skipping");
-      return;
-    }
-
-    if (socketRef.current) {
-      socketRef.current.removeAllListeners();
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
+    if (!isSessionActive) return;
+    if (socketRef.current?.connected) return;
+    if (socketRef.current) { socketRef.current.removeAllListeners(); socketRef.current.disconnect(); socketRef.current = null; }
 
     const socket = io(apiBaseUrl, {
       query: { url },
       auth: { token: localStorage.getItem("jwt_token") },
       reconnection: true,
-      reconnectionAttempts: Infinity,   // Keep retrying forever on TV
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 3000,
       reconnectionDelayMax: 30000,
       timeout: 30000,
       forceNew: true,
-      transports: ["websocket", "polling"],
     });
 
-    // ── Join the room as soon as we connect (or reconnect) ──────────────
     socket.on("connect", () => {
-      console.log("✅ Socket connected:", socket.id);
-      socket.emit(
-        "join",
-        { url, token: localStorage.getItem("jwt_token") },
-        (response) => {
-          if (response?.error) {
-            console.error("❌ Failed to join room:", response.error);
-          } else {
-            console.log(`🏠 Joined room: ${url}`);
-            // Pull fresh data immediately after (re)joining
-            fetchData("socket-connect");
-          }
-        }
-      );
+      socket.emit("join", { url, token: localStorage.getItem("jwt_token") }, (response) => {
+        if (response?.error) console.error("Failed to join room:", response.error);
+        else fetchData("socket-connect");
+      });
     });
 
-    // ── Content update pushed by the server ─────────────────────────────
-    socket.on("update", (data) => {
-      console.log("📡 Received socket 'update' event");
-      handleSocketUpdate(data, "update");
-    });
-
-    // ── Initial data push on first join ─────────────────────────────────
-    socket.on("init", (data) => {
-      console.log("📡 Received socket 'init' event");
-      handleSocketUpdate(data, "init");
-    });
-
-    // ── Reconnection handling ────────────────────────────────────────────
-    socket.on("reconnect", (attempt) => {
-      console.log(`🔄 Socket reconnected (attempt ${attempt})`);
-      // Re-fetch in case we missed updates while disconnected
-      fetchData("socket-reconnect");
-    });
-
-    socket.on("reconnect_attempt", (attempt) => {
-      console.log(`⏳ Socket reconnect attempt ${attempt}…`);
-    });
-
-    socket.on("reconnect_error", (err) => {
-      console.error("❌ Socket reconnect error:", err.message);
-    });
-
-    socket.on("disconnect", (reason) => {
-      console.warn("⚠️ Socket disconnected:", reason);
-      // "io server disconnect" means the server kicked us — reconnect manually
-      if (reason === "io server disconnect") {
-        socket.connect();
-      }
-    });
-
-    socket.on("connect_error", (err) => {
-      console.error("❌ Socket connection error:", err.message);
-    });
-
-    socket.on("error", (err) => {
-      console.error("❌ Socket error:", err);
-    });
+    socket.on("update", (data) => handleSocketUpdate(data, "update"));
+    socket.on("init", (data) => handleSocketUpdate(data, "init"));
+    socket.on("reconnect", () => fetchData("socket-reconnect"));
+    socket.on("disconnect", (reason) => { if (reason === "io server disconnect") socket.connect(); });
+    socket.on("connect_error", (err) => console.error("Socket connection error:", err.message));
 
     socketRef.current = socket;
   }, [url, handleSocketUpdate, fetchData, isSessionActive]);
 
-  // Helper function to reset state (unchanged)
-  function resetToFallbackState() {
-    setIsEnabled(false);
-    setMediaContent([]);
-    setVisibleItems([fallbackItem]);
-    setAllContent([]);
-    setScheduledAt(null);
-    setExpiresAt(null);
-    setCustomTicker(null);
-    setSettings(defaultSettings);
-    setIsLoading(false);
-
-    // Clear local storage
-    const cacheKey = `preview_${url}`;
-    localStorage.removeItem(cacheKey);
-    console.log(`Cleared local storage for ${cacheKey}`);
-  }
-
   useEffect(() => {
-    const handleMouseMove = () => {
-      resetControlTimeout();
-    };
-
+    const handleMouseMove = () => resetControlTimeout();
     window.addEventListener("mousemove", handleMouseMove);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      if (controlTimeoutRef.current) {
-        clearTimeout(controlTimeoutRef.current);
-      }
-    };
+    return () => { window.removeEventListener("mousemove", handleMouseMove); if (controlTimeoutRef.current) clearTimeout(controlTimeoutRef.current); };
   }, [resetControlTimeout]);
 
-  // Add this ref at the top with other refs
   const isInitializedRef = useRef(false);
 
-  // Replace the initialization useEffect
   useEffect(() => {
-    // Only run once on mount
     if (isInitializedRef.current) return;
     isInitializedRef.current = true;
 
     const loadData = async () => {
       setIsLoading(true);
-      try {
-        await Promise.all([fetchData("initial"), fetchWeather(), fetchNews()]);
-      } catch (error) {
-        console.error("Error loading data:", error);
-        setVisibleItems([fallbackItem]);
-      } finally {
-        setIsLoading(false);
-      }
+      try { await Promise.all([fetchData("initial"), fetchWeather(), fetchNews()]); }
+      catch (error) { console.error("Error loading data:", error); setVisibleItems([fallbackItem]); }
+      finally { setIsLoading(false); }
     };
 
     loadData();
     connectSocket();
 
-    // Cleanup on unmount only
     return () => {
-      console.log("Component unmounting - final cleanup");
       isInitializedRef.current = false;
-
-      if (socketRef.current) {
-        socketRef.current.removeAllListeners();
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-
-      if (pollingRef.current) {
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
+      if (socketRef.current) { socketRef.current.removeAllListeners(); socketRef.current.disconnect(); socketRef.current = null; }
+      if (pollingRef.current) { clearInterval(pollingRef.current); pollingRef.current = null; }
     };
-  }, []); // ← Empty dependency array - run once only!
+  }, []);
 
+  useEffect(() => { getUserLocation(); }, [getUserLocation]);
+
+  // ── Slideshow timer — advances by display unit ─────────────────────────────
   useEffect(() => {
-    getUserLocation();
-  }, [getUserLocation]);
-
-  // Replace the slideshow useEffect in Preview component
-
-  useEffect(() => {
-    if (mediaContent.length === 0 || !isEnabled || isPaused) {
+    if (displayUnits.length === 0 || !isEnabled || isPaused) {
       setActiveSlideshow(false);
-      if (mediaContent.length === 0 || !isEnabled) {
-        setVisibleItems([fallbackItem]);
-      }
+      if (displayUnits.length === 0 || !isEnabled) setVisibleItems([fallbackItem]);
       return;
     }
 
     setActiveSlideshow(true);
-    const currentItemIndex = currentIndex % mediaContent.length;
-    const currentItem = mediaContent[currentItemIndex] || fallbackItem;
+    if (displayUnits.length <= 1) return; // Single unit — no timer needed
 
-    if (
-      !currentItem ||
-      !Number.isFinite(currentItem.time) ||
-      currentItem.time <= 0
-    ) {
-      console.warn("Invalid current item or time, using fallback", {
-        currentIndex,
-        item: currentItem,
-      });
-      setVisibleItems([fallbackItem]);
-      return;
-    }
+    const idx = currentUnitIndex % displayUnits.length;
+    const unit = displayUnits[idx];
+    if (!unit || !Number.isFinite(unit.time) || unit.time <= 0) { setVisibleItems([fallbackItem]); return; }
 
-    const currentLayout = currentItem.layout || "single";
-    setCurrentLayout(currentLayout);
-    const layoutConfig =
-      layoutOptions.find((option) => option.id === currentLayout) ||
-      layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const groupedContent = groupMediaByLayout(mediaContent);
-    updateVisibleItems(currentLayout, groupedContent, currentIndex);
-
-    // NEW: Check if current item is a PDF
-    const isPdfContent = currentItem.content?.endsWith('.pdf');
-
-    // NEW: For single PDF in single layout, don't set timer to avoid restart
-    if (isPdfContent && mediaContent.length === 1 && currentLayout === 'single') {
-      console.log('Single PDF detected - continuous scroll mode, no slideshow timer');
-      return; // Don't set any timer, let PDF scroll infinitely
-    }
-
-    const delay = currentItem.time * 1000;
-
+    const delay = unit.time * 1000;
     const timer = setTimeout(() => {
-      const nextIndex = currentIndex + itemsPerPage;
-
-      // NEW: If we're looping back to the same single item, don't trigger re-render
-      if (nextIndex >= mediaContent.length) {
-        if (mediaContent.length === 1 && currentIndex === 0) {
-          console.log('Already showing single item, skipping index update');
-          return; // Don't update state if we're already showing the only item
-        }
-
-        setCurrentIndex(0);
-        const firstLayout = mediaContent[0]?.layout || "single";
-        setCurrentLayout(firstLayout);
-        updateVisibleItems(firstLayout, groupedContent, 0);
-        console.log("Completed one loop, relying on Socket.IO for updates");
-      } else {
-        setCurrentIndex(nextIndex);
-        const nextItem = mediaContent[nextIndex] || fallbackItem;
-        const nextLayout = nextItem.layout || "single";
-        setCurrentLayout(nextLayout);
-        updateVisibleItems(nextLayout, groupedContent, nextIndex);
-      }
+      setCurrentUnitIndex((prev) => (prev + 1) % displayUnits.length);
     }, delay);
 
-    return () => {
-      console.log("Clearing slideshow timer");
-      clearTimeout(timer);
-    };
-  }, [
-    mediaContent,
-    currentIndex,
-    isPaused,
-    isEnabled,
-    groupMediaByLayout,
-    updateVisibleItems,
-  ]);
+    return () => clearTimeout(timer);
+  }, [displayUnits, currentUnitIndex, isPaused, isEnabled]);
+
   useEffect(() => {
     const now = new Date();
     if (scheduledAt && now < scheduledAt) {
-      setIsEnabled(false);
-      setCountdownType("start");
-      const timerInterval = setInterval(() => {
-        const currentTime = new Date();
-        const timeUntilStart = scheduledAt - currentTime;
-        if (timeUntilStart <= 0) {
-          setIsEnabled(true);
-          setCountdownType(null);
-          clearInterval(timerInterval);
-          fetchData("schedule-start");
-        } else {
-          setTimeRemaining(timeUntilStart);
-        }
+      setIsEnabled(false); setCountdownType("start");
+      const interval = setInterval(() => {
+        const t = scheduledAt - new Date();
+        if (t <= 0) { setIsEnabled(true); setCountdownType(null); clearInterval(interval); fetchData("schedule-start"); }
+        else setTimeRemaining(t);
       }, 1000);
-      return () => clearInterval(timerInterval);
+      return () => clearInterval(interval);
     } else if (expiresAt && now < expiresAt) {
-      setIsEnabled(true);
-      setCountdownType("end");
-      const timerInterval = setInterval(() => {
-        const currentTime = new Date();
-        const timeUntilExpiry = expiresAt - currentTime;
-        if (timeUntilExpiry <= 0) {
-          setIsEnabled(false);
-          setCountdownType(null);
-          clearInterval(timerInterval);
-          fetchData("schedule-end");
-        } else {
-          setTimeRemaining(timeUntilExpiry);
-        }
+      setIsEnabled(true); setCountdownType("end");
+      const interval = setInterval(() => {
+        const t = expiresAt - new Date();
+        if (t <= 0) { setIsEnabled(false); setCountdownType(null); clearInterval(interval); fetchData("schedule-end"); }
+        else setTimeRemaining(t);
       }, 1000);
-      return () => clearInterval(timerInterval);
+      return () => clearInterval(interval);
     } else if (expiresAt && now >= expiresAt) {
-      setIsEnabled(false);
-      setCountdownType(null);
-    }
-    if (!isEnabled && visibleItems.length === 0) {
-      console.warn("Preview disabled, using fallback");
-      setVisibleItems([fallbackItem]);
+      setIsEnabled(false); setCountdownType(null);
     }
   }, [scheduledAt, expiresAt, isEnabled, fetchData]);
-
-
 
   return (
     <div className="relative flex justify-center items-center w-screen h-screen bg-black overflow-hidden">
       {isLoading ? (
-        renderFallbackUI(
-          "Wait, your content is loading",
-          countdownType,
-          timeRemaining,
-          formatTimeRemaining
-        )
+        renderFallbackUI("Wait, your content is loading", countdownType, timeRemaining, formatTimeRemaining)
       ) : !isEnabled ? (
-        renderFallbackUI(
-          "This URL is currently inactive.",
-          countdownType,
-          timeRemaining,
-          formatTimeRemaining
-        )
-      ) : mediaContent.length > 0 ? (
+        renderFallbackUI("This URL is currently inactive.", countdownType, timeRemaining, formatTimeRemaining)
+      ) : displayUnits.length > 0 ? (
         <div className={`grid w-full h-screen gap-2 ${getGridClasses()}`}>
-          {visibleItems.map((item, index) => (
-            <div
-              key={index}
-              className="relative w-full h-full bg-gray-900 rounded overflow-hidden"
-            >
-              <MediaItem
-                content={item}
-                index={currentIndex + index}
+          {visibleItems.map((unit, index) => (
+            <div key={unit.type === "group" ? `group-${unit.groupId}` : `unit-${currentUnitIndex + index}`} className="relative w-full h-full bg-gray-900 rounded overflow-hidden">
+              <DisplayUnitRenderer
+                unit={unit}
+                unitIndex={currentUnitIndex + index}
                 isPaused={isPaused}
                 setProgress={setProgress}
                 getContentUrl={getContentUrl}
@@ -2529,80 +1494,42 @@ const Preview = () => {
           ))}
         </div>
       ) : (
-        renderFallbackUI(
-          "This URL has no content to display. Please check the URL or content configuration.",
-          countdownType,
-          timeRemaining,
-          formatTimeRemaining
-        )
+        renderFallbackUI("This URL has no content to display.", countdownType, timeRemaining, formatTimeRemaining)
       )}
 
       {isEnabled && countdownType === "end" && (
         <div className="absolute top-4 right-4 bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm">
           <div className="flex items-center gap-2">
             <FaClock size={20} className="text-red-400" />
-            <span className="font-mono">
-              {formatTimeRemaining(timeRemaining)}
-            </span>
+            <span className="font-mono">{formatTimeRemaining(timeRemaining)}</span>
           </div>
         </div>
       )}
 
-      <ClockDisplay
-        position={settings.dateTime.position}
-        visible={settings.dateTime.visible}
-      />
-
-      <TemperatureDisplay
-        weather={weather}
-        position={settings.temperature.position}
-        visible={settings.temperature.visible}
-      />
+      <ClockDisplay position={settings.dateTime.position} visible={settings.dateTime.visible} />
+      <TemperatureDisplay weather={weather} position={settings.temperature.position} visible={settings.temperature.visible} />
 
       {(customTicker || news.length > 0) && settings.ticker.visible && (
-        <div
-          className="absolute bottom-16 left-0 w-full overflow-hidden bg-black bg-opacity-70 py-3"
-          style={{
-            height: `${settings.ticker.height}px`,
-          }}
-        >
+        <div className="absolute bottom-16 left-0 w-full overflow-hidden bg-black bg-opacity-70 py-3" style={{ height: `${settings.ticker.height}px` }}>
           <div className="news-ticker-container relative w-full">
             <div
               key={`ticker-${settings.ticker.speed}-${settings.ticker.fontSize}`}
               className="news-ticker"
               style={{
                 animationName: "marquee",
-                animationDuration: `${customTicker
-                  ? settings.ticker.speed * 0.5
-                  : settings.ticker.speed
-                  }s`, // Make custom ticker 2x faster
+                animationDuration: `${customTicker ? settings.ticker.speed * 0.5 : settings.ticker.speed}s`,
                 animationTimingFunction: "linear",
                 animationIterationCount: "infinite",
                 fontSize: `${settings.ticker.fontSize}px`,
               }}
             >
               {customTicker ? (
-                <span className="news-item inline-block px-6 text-white">
-                  {customTicker}
-                </span>
+                <span className="news-item inline-block px-6 text-white">{customTicker}</span>
               ) : (
                 <>
-                  {news.map((article, index) => (
-                    <span
-                      key={`news-item-1-${index}`}
-                      className="news-item inline-block px-6 text-white"
-                    >
-                      <strong>{article.title}</strong> -{" "}
-                      {formatDescription(article.description)}
-                    </span>
-                  ))}
-                  {news.map((article, index) => (
-                    <span
-                      key={`news-item-2-${index}`}
-                      className="news-item inline-block px-6 text-white"
-                    >
-                      <strong>{article.title}</strong> -{" "}
-                      {formatDescription(article.description)}
+                  {[...news, ...news].map((article, index) => (
+                    <span key={`news-${index}`} className="news-item inline-block px-6 text-white">
+                      <strong>{article.title}</strong> — {formatDescription(article.description)}
                     </span>
                   ))}
                 </>
@@ -2612,40 +1539,19 @@ const Preview = () => {
         </div>
       )}
 
-      {showControls &&
-        isEnabled &&
-        mediaContent.length > 0 &&
-        !isAnyPowerBIContent() && (
-          <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
-            <button
-              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                goPrev();
-              }}
-            >
-              <FaChevronLeft size={25} />
-            </button>
-            <button
-              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                togglePlayPause();
-              }}
-            >
-              {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
-            </button>
-            <button
-              className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100"
-              onClick={(e) => {
-                e.stopPropagation();
-                goNext();
-              }}
-            >
-              <FaChevronRight size={25} />
-            </button>
-          </div>
-        )}
+      {showControls && isEnabled && displayUnits.length > 0 && !isAnyPowerBIContent() && (
+        <div className="absolute bottom-28 left-1/2 transform -translate-x-1/2 flex gap-8 z-10">
+          <button className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100" onClick={(e) => { e.stopPropagation(); goPrev(); }}>
+            <FaChevronLeft size={25} />
+          </button>
+          <button className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100" onClick={(e) => { e.stopPropagation(); togglePlayPause(); }}>
+            {isPaused ? <FaPlay size={25} /> : <FaPause size={25} />}
+          </button>
+          <button className="bg-gray-900 bg-opacity-80 text-white p-5 rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:bg-opacity-100" onClick={(e) => { e.stopPropagation(); goNext(); }}>
+            <FaChevronRight size={25} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

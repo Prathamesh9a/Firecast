@@ -56,6 +56,7 @@ const defaultSettings = {
     height: 48,
     fontSize: 16,
     visible: true,
+    rssFeed: ["nbc"], // Default RSS feed
   },
   dateTime: {
     position: "top-right",
@@ -92,9 +93,8 @@ const TemperatureDisplay = React.memo(({ weather, position, visible }) => {
 
   return (
     <div
-      className={`absolute ${
-        positionClasses[position] || "bottom-4 left-4"
-      } bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm flex items-center gap-2`}
+      className={`absolute ${positionClasses[position] || "bottom-4 left-4"
+        } bg-black bg-opacity-50 text-white p-3 rounded-lg backdrop-blur-sm flex items-center gap-2`}
     >
       <img
         src={`https:${weather.current.condition.icon}`}
@@ -211,7 +211,7 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
       resizeObserver.observe(containerRef.current);
     }
     window.addEventListener("resize", updateWidth);
-    
+
     return () => {
       if (containerRef.current) {
         resizeObserver.unobserve(containerRef.current);
@@ -231,18 +231,18 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
     }
 
     console.log(`Rendering PDF page ${pageNum} with width: ${containerWidth}`);
-    
+
     const canvas = canvasRef.current;
     const context = canvas.getContext("2d");
-    
+
     try {
       const viewport = page.getViewport({ scale: 1.0 });
       const aspectRatio = viewport.width / viewport.height;
-      
+
       // Calculate scale based on container width with some padding
       const scale = (containerWidth * 0.95 * window.devicePixelRatio) / viewport.width;
       const scaledViewport = page.getViewport({ scale });
-      
+
       canvas.width = scaledViewport.width;
       canvas.height = scaledViewport.height;
       canvas.style.width = `${containerWidth * 0.95}px`;
@@ -251,17 +251,17 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
       // Set higher quality rendering
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = "high";
-      
-      const renderContext = { 
-        canvasContext: context, 
-        viewport: scaledViewport 
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: scaledViewport
       };
 
       let isCancelled = false;
-      
+
       console.log(`Starting render for page ${pageNum}`);
       const renderTask = page.render(renderContext);
-      
+
       renderTask.promise
         .then(() => {
           if (!isCancelled) {
@@ -314,286 +314,300 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
 });
 
 // DocumentContent Component
-// DocumentContent Component
-  const DocumentContent = React.memo(
-    ({ content, summary, getContentUrl, isPaused, originalFormat, time }) => {
-      const fileType = content?.split(".").pop()?.toLowerCase() || "";
-      const fileUrl = content ? getContentUrl(content) : "";
-      const [pages, setPages] = useState([]);
-      const [error, setError] = useState(null);
-      const [showSummary, setShowSummary] = useState(!!summary);
-      const [totalScrollHeight, setTotalScrollHeight] = useState(0);
-      const [containerHeight, setContainerHeight] = useState(0);
-      const containerRef = useRef(null);
-      const scrollIntervalRef = useRef(null);
-      const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.5 });
+const DocumentContent = React.memo(
+  ({ content, summary, getContentUrl, isPaused, originalFormat, time }) => {
+    const fileType = content?.split(".").pop()?.toLowerCase() || "";
+    const fileUrl = content ? getContentUrl(content) : "";
+    const [pages, setPages] = useState([]);
+    const [error, setError] = useState(null);
+    const [showSummary, setShowSummary] = useState(!!summary);
+    const [totalScrollHeight, setTotalScrollHeight] = useState(0);
+    const [containerHeight, setContainerHeight] = useState(0);
+    const containerRef = useRef(null);
+    const scrollIntervalRef = useRef(null);
+    const { ref, inView } = useInView({ triggerOnce: false, threshold: 0.5 });
 
-      const toggleSummary = useCallback((e) => {
-        e.stopPropagation();
-        setShowSummary((prev) => !prev);
-      }, []);
+    const toggleSummary = useCallback((e) => {
+      e.stopPropagation();
+      setShowSummary((prev) => !prev);
+    }, []);
 
 
-  const calculateScrollSpeed = useCallback((scrollableHeight, time) => {
-    if (!time || time <= 0) return 2; // Default slow scroll
-    
-    // Calculate pixels per second to complete scroll in given time
-    const pixelsPerSecond = scrollableHeight / time;
-    // Convert to pixels per 50ms (our interval)
-    const pixelsPerInterval = (pixelsPerSecond * 50) / 1000;
-    
-    return Math.max(1, pixelsPerInterval);
-  }, []);
+    const calculateScrollSpeed = useCallback((scrollableHeight, time) => {
+      if (!time || time <= 0) return 2; // Default slow scroll
 
-  // In DocumentContent component, update the scroll effect:
-  useEffect(() => {
-    if (
-      fileType !== "pdf" ||
-      !inView ||
-      isPaused ||
-      !containerRef.current ||
-      showSummary
-    )
-      return;
-  
-    const container = containerRef.current;
-    let isScrolling = true;
-    let scrollInterval = null;
-    let hasStarted = false;
-  
-    const startScrolling = () => {
-      if (hasStarted || !isScrolling) return;
-      hasStarted = true;
-  
-      const totalScrollHeight = container.scrollHeight;
-      const containerHeight = container.clientHeight;
-      const scrollableHeight = totalScrollHeight - containerHeight;
-  
-      if (scrollableHeight <= 50) {
-        console.log("Not enough content to scroll");
+      // Calculate pixels per second to complete scroll in given time
+      const pixelsPerSecond = scrollableHeight / time;
+      // Convert to pixels per 50ms (our interval)
+      const pixelsPerInterval = (pixelsPerSecond * 50) / 1000;
+
+      return Math.max(1, pixelsPerInterval);
+    }, []);
+
+    useEffect(() => {
+      if (
+        fileType !== "pdf" ||
+        !inView ||
+        isPaused ||
+        !containerRef.current ||
+        showSummary
+      )
         return;
-      }
-  
-      const scrollSpeed = calculateScrollSpeed(scrollableHeight, time);
-  
-      console.log(
-        `Starting PDF scroll: ${scrollableHeight}px over ${time}s → ${scrollSpeed}px/50ms`
-      );
-  
-      scrollInterval = setInterval(() => {
-        if (!isScrolling || !container) return;
-  
-        const current = container.scrollTop;
-        const max = scrollableHeight;
-  
-        if (current >= max - 10) {
-          container.scrollTo({ top: 0, behavior: "smooth" });
-        } else {
-          container.scrollTo({
-            top: Math.min(current + scrollSpeed, max),
-            behavior: "auto",
-          });
+
+      const container = containerRef.current;
+      let rafId = null;        // requestAnimationFrame handle
+      let isActive = true;     // cleanup guard
+
+      // ── Step 1: Wait until scrollHeight is stable ─────────────────────
+      // On a Smart TV a large PDF can keep growing for 10–20 s while pages
+      // finish painting.  We wait for the height to stay the same across
+      // STABLE_ROUNDS consecutive checks, each CHECK_MS apart.
+      const CHECK_MS = 800;   // check every 800 ms (was 500 ms)
+      const STABLE_ROUNDS = 5;    // need 5 stable rounds = 4 s of stability (was 3 = 1.5 s)
+      const MAX_WAIT_MS = 40_000; // give up and scroll anyway after 40 s (was 15 s)
+
+      let lastHeight = 0;
+      let stableCount = 0;
+      let heightCheckId = null;
+      let maxWaitId = null;
+
+      const startScrolling = () => {
+        if (!isActive || !containerRef.current) return;
+
+        // Reset to top before starting
+        container.scrollTop = 0;
+
+        // Allow one frame for the browser to acknowledge the reset
+        requestAnimationFrame(() => {
+          if (!isActive) return;
+          runScrollLoop();
+        });
+      };
+
+      // ── Step 2: Smooth scroll loop using requestAnimationFrame ─────────
+      // We calculate how many pixels to advance per frame so that the
+      // entire document scrolls past exactly once in `time` seconds.
+      const runScrollLoop = () => {
+        const scrollableHeight =
+          container.scrollHeight - container.clientHeight;
+
+        if (scrollableHeight < 50) {
+          // Not enough to scroll — nothing to do
+          return;
         }
-      }, 50);
-    };
-  
-    // === Observer: Wait for scrollHeight to stabilize ===
-    let lastHeight = 0;
-    let stableCount = 0;
-    const STABLE_THRESHOLD = 3; // Wait for 3 consecutive same height
-    const CHECK_INTERVAL = 500; // Check every 500ms
-  
-    const heightObserver = setInterval(() => {
-      if (!containerRef.current || !isScrolling) {
-        clearInterval(heightObserver);
-        return;
-      }
-  
-      const currentHeight = containerRef.current.scrollHeight;
-  
-      if (currentHeight === lastHeight) {
-        stableCount++;
-      } else {
-        stableCount = 0;
-        lastHeight = currentHeight;
-      }
-  
-      if (stableCount >= STABLE_THRESHOLD && currentHeight > containerHeight) {
-        clearInterval(heightObserver);
-        console.log(`PDF fully rendered. Height stable at ${currentHeight}px`);
-        startScrolling();
-      }
-    }, CHECK_INTERVAL);
-  
-    // Fallback: Start after max 15 seconds even if not stable
-    const maxWait = setTimeout(() => {
-      if (!hasStarted && containerRef.current) {
-        clearInterval(heightObserver);
-        console.warn("PDF render timeout. Forcing scroll start.");
-        startScrolling();
-      }
-    }, 15000);
-  
-    return () => {
-      isScrolling = false;
-      hasStarted = true;
-      clearInterval(scrollInterval);
-      clearInterval(heightObserver);
-      clearTimeout(maxWait);
-    };
-  }, [
-    fileType,
-    inView,
-    isPaused,
-    showSummary,
-    time,
-    calculateScrollSpeed,
-    pages.length, // ← Add this!
-  ]);
-  
-      // Update container dimensions when content changes
-      useEffect(() => {
-        if (containerRef.current && pages.length > 0) {
-          const container = containerRef.current;
-          const updateDimensions = () => {
-            setTotalScrollHeight(container.scrollHeight);
-            setContainerHeight(container.clientHeight);
-          };
 
-          updateDimensions();
-          
-          const resizeObserver = new ResizeObserver(updateDimensions);
-          resizeObserver.observe(container);
+        // pixels per millisecond derived from the item's display time
+        const durationMs = (time > 0 ? time : 30) * 1000;
+        const pxPerMs = scrollableHeight / durationMs;
+        let lastTimestamp = null;
 
-          return () => {
-            resizeObserver.unobserve(container);
-          };
-        }
-      }, [pages]);
+        const step = (timestamp) => {
+          if (!isActive || !containerRef.current) return;
 
-      // Reset scroll position when content changes
-      useEffect(() => {
-        if (containerRef.current) {
-          containerRef.current.scrollTop = 0;
-        }
-      }, [content]);
+          if (lastTimestamp === null) lastTimestamp = timestamp;
+          const elapsed = timestamp - lastTimestamp;
+          lastTimestamp = timestamp;
 
-      useEffect(() => {
-        if (fileType !== "pdf" || !inView || showSummary || !fileUrl) return;
-        
-        console.log("Loading PDF:", fileUrl);
-        const loadPdf = async () => {
-          try {
-            const pdf = await pdfjsLib.getDocument(fileUrl).promise;
-            console.log("PDF loaded successfully, pages:", pdf.numPages);
-            const numPages = pdf.numPages;
-            const pageData = [];
-            for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-              try {
-                const page = await pdf.getPage(pageNum);
-                const viewport = page.getViewport({ scale: 1.0 });
-                console.log(`Page ${pageNum} loaded with viewport:`, viewport);
-                pageData.push({ pageNum, viewport, page });
-              } catch (pageError) {
-                console.error(`Error loading page ${pageNum}:`, pageError);
-              }
-            }
-            if (pageData.length === 0) {
-              setError("No valid pages found in PDF");
-            } else {
-              setPages(pageData);
-              setError(null);
-            }
-          } catch (error) {
-            console.error("Error loading PDF:", error);
-            setError("Wait Your Content Is Loading");
+          const max = container.scrollHeight - container.clientHeight;
+          const current = container.scrollTop;
+          const advance = pxPerMs * elapsed;
+
+          if (current + advance >= max - 1) {
+            // Reached the bottom — jump back to top and restart
+            container.scrollTop = 0;
+            // Brief pause at the top so it doesn't feel jarring
+            setTimeout(() => {
+              if (isActive) runScrollLoop();
+            }, 600);
+            return;
           }
+
+          container.scrollTop = current + advance;
+          rafId = requestAnimationFrame(step);
         };
-        loadPdf();
-      }, [fileType, fileUrl, inView, showSummary]);
 
-      const cleanedSummary = summary
-        ? summary.replace(/<think>[\s\S]*<\/think>/g, "").trim()
-        : null;
+        rafId = requestAnimationFrame(step);
+      };
 
-      if (cleanedSummary && showSummary) {
-        return (
-          <div className="relative w-full h-screen">
-            <div className="w-full h-screen overflow-y-auto scrollbar-hidden bg-gray-900 p-8">
-              <div className="max-w-3xl mx-auto">
-                <h2 className="text-2xl font-bold mb-6 text-white">
-                  Document Summary
-                </h2>
-                <div className="prose prose-lg prose-invert">
-                  <div
-                    dangerouslySetInnerHTML={{ __html: cleanedSummary }}
-                    className="text-white"
-                  />
-                </div>
+      // ── Height-stability watcher ────────────────────────────────────────
+      heightCheckId = setInterval(() => {
+        if (!isActive || !containerRef.current) {
+          clearInterval(heightCheckId);
+          return;
+        }
+
+        const h = containerRef.current.scrollHeight;
+        if (h === lastHeight) {
+          stableCount++;
+        } else {
+          stableCount = 0;
+          lastHeight = h;
+        }
+
+        if (
+          stableCount >= STABLE_ROUNDS &&
+          h > (containerRef.current.clientHeight || 0)
+        ) {
+          clearInterval(heightCheckId);
+          clearTimeout(maxWaitId);
+          console.log(`✅ PDF height stable at ${h}px — starting scroll`);
+          startScrolling();
+        }
+      }, CHECK_MS);
+
+      // Hard deadline — start scrolling even if PDF is still rendering
+      maxWaitId = setTimeout(() => {
+        if (!isActive) return;
+        clearInterval(heightCheckId);
+        console.warn("⚠️ PDF height never stabilised — forcing scroll start");
+        startScrolling();
+      }, MAX_WAIT_MS);
+
+      // ── Cleanup ─────────────────────────────────────────────────────────
+      return () => {
+        isActive = false;
+        if (rafId) cancelAnimationFrame(rafId);
+        if (heightCheckId) clearInterval(heightCheckId);
+        if (maxWaitId) clearTimeout(maxWaitId);
+      };
+    }, [
+      fileType,
+      inView,
+      isPaused,
+      showSummary,
+      time,
+      pages.length,   // restart when more pages finish rendering
+    ]);
+
+    // Update container dimensions when content changes
+    useEffect(() => {
+      if (containerRef.current && pages.length > 0) {
+        const container = containerRef.current;
+        const updateDimensions = () => {
+          setTotalScrollHeight(container.scrollHeight);
+          setContainerHeight(container.clientHeight);
+        };
+
+        updateDimensions();
+
+        const resizeObserver = new ResizeObserver(updateDimensions);
+        resizeObserver.observe(container);
+
+        return () => {
+          resizeObserver.unobserve(container);
+        };
+      }
+    }, [pages]);
+
+    // Reset scroll position when content changes
+    useEffect(() => {
+      if (containerRef.current) {
+        containerRef.current.scrollTop = 0;
+      }
+    }, [content]);
+
+    // Right before the PDF loading useEffect
+    useEffect(() => {
+      console.log('📄 PDF Effect Deps Changed:', {
+        fileType,
+        fileUrl,
+        inView,
+        showSummary,
+        timestamp: new Date().toISOString()
+      });
+    }, [fileType, fileUrl, inView, showSummary]);
+
+    // In DocumentContent component
+    const [isRendering, setIsRendering] = useState(false);
+    const renderTimeoutRef = useRef(null);
+
+    useEffect(() => {
+      if (fileType !== "pdf" || !inView || showSummary || !fileUrl) return;
+
+      // Prevent reload if already rendering
+      if (isRendering) {
+        console.log("⚠️ PDF already rendering, skipping reload");
+        return;
+      }
+
+      setIsRendering(true);
+      console.log("Loading PDF:", fileUrl);
+
+      const loadPdf = async () => {
+        try {
+          const pdf = await pdfjsLib.getDocument(fileUrl).promise;
+          console.log("PDF loaded successfully, pages:", pdf.numPages);
+
+          const numPages = pdf.numPages;
+          const pageData = [];
+
+          for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+            try {
+              const page = await pdf.getPage(pageNum);
+              const viewport = page.getViewport({ scale: 1.0 });
+              pageData.push({ pageNum, viewport, page });
+            } catch (pageError) {
+              console.error(`Error loading page ${pageNum}:`, pageError);
+            }
+          }
+
+          if (pageData.length === 0) {
+            setError("No valid pages found in PDF");
+          } else {
+            setPages(pageData);
+            setError(null);
+          }
+        } catch (error) {
+          console.error("Error loading PDF:", error);
+          setError("Wait Your Content Is Loading");
+        } finally {
+          // Mark as done after a delay to ensure rendering completes
+          renderTimeoutRef.current = setTimeout(() => {
+            setIsRendering(false);
+          }, 2000);
+        }
+      };
+
+      loadPdf();
+
+      return () => {
+        if (renderTimeoutRef.current) {
+          clearTimeout(renderTimeoutRef.current);
+        }
+      };
+    }, [fileType, fileUrl, inView, showSummary]); // Removed isRendering from deps
+
+    const cleanedSummary = summary
+      ? summary.replace(/<think>[\s\S]*<\/think>/g, "").trim()
+      : null;
+
+    if (cleanedSummary && showSummary) {
+      return (
+        <div className="relative w-full h-screen">
+          <div className="w-full h-screen overflow-y-auto scrollbar-hidden bg-gray-900 p-8">
+            <div className="max-w-3xl mx-auto">
+              <h2 className="text-2xl font-bold mb-6 text-white">
+                Document Summary
+              </h2>
+              <div className="prose prose-lg prose-invert">
+                <div
+                  dangerouslySetInnerHTML={{ __html: cleanedSummary }}
+                  className="text-white"
+                />
               </div>
             </div>
-            <button
-              onClick={toggleSummary}
-              className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
-            >
-              View Full Document
-            </button>
           </div>
-        );
-      }
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+          >
+            View Full Document
+          </button>
+        </div>
+      );
+    }
 
-      if (fileType === "pdf") {
-        return (
-          <div className="relative w-full h-screen">
-            <div
-              ref={(node) => {
-                containerRef.current = node;
-                ref(node);
-              }}
-              className="w-full h-screen overflow-y-auto scrollbar-hidden"
-              style={{ scrollBehavior: "smooth" }}
-            >
-              {inView ? (
-                <div className="w-full min-h-screen flex flex-col items-center bg-gray-900">
-                  {error ? (
-                    <div className="w-full h-screen flex items-center justify-center text-white">
-                      {error}
-                    </div>
-                  ) : pages.length > 0 ? (
-                    <>
-                      {pages.map((page) => (
-                        <div
-                          key={`page-container-${page.pageNum}`}
-                          className="w-full mb-4"
-                        >
-                          <PageRenderer page={page.page} pageNum={page.pageNum} />
-                        </div>
-                      ))}
-                    </>
-                  ) : (
-                    <div className="w-full h-screen flex items-center justify-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
-                </div>
-              )}
-            </div>
-            {cleanedSummary && (
-              <button
-                onClick={toggleSummary}
-                className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
-              >
-                View Summary
-              </button>
-            )}
-          </div>
-        );
-      }
-
+    if (fileType === "pdf") {
       return (
         <div className="relative w-full h-screen">
           <div
@@ -602,19 +616,30 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
               ref(node);
             }}
             className="w-full h-screen overflow-y-auto scrollbar-hidden"
-            style={{ scrollBehavior: "smooth" }}
+            style={{ scrollBehavior: "auto" }}
           >
             {inView ? (
-              <div className="w-full h-screen flex items-center justify-center text-white bg-gray-900">
-                <div className="text-center">
-                  <p className="text-xl font-semibold mb-2">
-                    Wait Your Content Is Loading
-                  </p>
-                  <p className="text-lg">
-                    The document may not have been converted to PDF correctly.
-                    Please contact support.
-                  </p>
-                </div>
+              <div className="w-full min-h-screen flex flex-col items-center bg-gray-900">
+                {error ? (
+                  <div className="w-full h-screen flex items-center justify-center text-white">
+                    {error}
+                  </div>
+                ) : pages.length > 0 ? (
+                  <>
+                    {pages.map((page) => (
+                      <div
+                        key={`page-container-${page.pageNum}`}
+                        className="w-full mb-4"
+                      >
+                        <PageRenderer page={page.page} pageNum={page.pageNum} />
+                      </div>
+                    ))}
+                  </>
+                ) : (
+                  <div className="w-full h-screen flex items-center justify-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
@@ -633,7 +658,47 @@ const PageRenderer = React.memo(({ page, pageNum }) => {
         </div>
       );
     }
-  );
+
+    return (
+      <div className="relative w-full h-screen">
+        <div
+          ref={(node) => {
+            containerRef.current = node;
+            ref(node);
+          }}
+          className="w-full h-screen overflow-y-auto scrollbar-hidden"
+          style={{ scrollBehavior: "smooth" }}
+        >
+          {inView ? (
+            <div className="w-full h-screen flex items-center justify-center text-white bg-gray-900">
+              <div className="text-center">
+                <p className="text-xl font-semibold mb-2">
+                  Wait Your Content Is Loading
+                </p>
+                <p className="text-lg">
+                  The document may not have been converted to PDF correctly.
+                  Please contact support.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full h-screen bg-gray-900 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+            </div>
+          )}
+        </div>
+        {cleanedSummary && (
+          <button
+            onClick={toggleSummary}
+            className="absolute top-[13%] right-3 bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-md shadow-lg z-10"
+          >
+            View Summary
+          </button>
+        )}
+      </div>
+    );
+  }
+);
 
 // MediaItem Component
 const MediaItem = React.memo(
@@ -955,9 +1020,8 @@ const MediaItem = React.memo(
                 ref={videoRef}
                 autoPlay={!isPaused}
                 muted
-                className={`w-full h-full object-contain ${
-                  isLoading ? "opacity-0" : "opacity-100"
-                }`}
+                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"
+                  }`}
                 style={{ transition: "opacity 0.3s ease" }}
               >
                 <source
@@ -966,8 +1030,8 @@ const MediaItem = React.memo(
                     videoSrc.toLowerCase().endsWith(".mp4")
                       ? "video/mp4"
                       : isMov
-                      ? "video/quicktime"
-                      : "video/webm"
+                        ? "video/quicktime"
+                        : "video/webm"
                   }
                 />
                 Your browser does not support the video tag.
@@ -1051,9 +1115,8 @@ const MediaItem = React.memo(
               <img
                 src={contentUrl}
                 alt="Preview content"
-                className={`w-full h-full object-contain ${
-                  isLoading ? "opacity-0" : "opacity-100"
-                }`}
+                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"
+                  }`}
                 loading="lazy"
                 style={{ transition: "opacity 0.3s ease" }}
                 onLoad={() => setIsLoading(false)}
@@ -1162,9 +1225,8 @@ const ClockDisplay = React.memo(
 
     return (
       <div
-        className={`absolute ${
-          positionClasses[position] || "top-4 right-4"
-        } flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
+        className={`absolute ${positionClasses[position] || "top-4 right-4"
+          } flex items-center gap-3 bg-gradient-to-r from-gray-600 to-gray-700 text-white px-4 py-2 rounded-xl shadow-lg backdrop-blur-lg`}
       >
         <Clock className="w-6 h-6 text-yellow-400" />
         <div className="text-right">
@@ -1230,7 +1292,7 @@ const getCurrentPosition = () => {
   });
 };
 
-const Preview = () => {
+const Preview1 = () => {
   const { url } = useParams();
   const mediaItems = useSelector((state) => state.media.mediaItems);
   const [mediaContent, setMediaContent] = useState([]);
@@ -1494,12 +1556,17 @@ const Preview = () => {
           : `${apiBaseUrl}/${content}`;
       }
 
-      // const cacheBusterValue =
-      //   url === "Automate" ? stableCacheBuster : "static";
-      // const cacheBusterParam = `t=${cacheBusterValue}`;
+      // IMPORTANT: Normalize path (fix double slashes consistently)
+      if (baseUrl.includes(apiBaseUrl)) {
+        // It's a full URL with apiBaseUrl - normalize it
+        baseUrl = baseUrl.replace(/([^:]\/)\/+/g, '$1'); // Remove duplicate slashes except after protocol
+      }
+
       const separator = baseUrl.includes("?") ? "&" : "?";
 
-      return `${baseUrl}${separator}`;
+      // Add cache buster only for non-PDF files or initial load
+      const cacheBuster = content.endsWith('.pdf') ? '' : `v=${Date.now()}`;
+      return cacheBuster ? `${baseUrl}${separator}${cacheBuster}` : `${baseUrl}${separator}`;
     },
     [url]
   );
@@ -1517,8 +1584,8 @@ const Preview = () => {
           )
             ? "video"
             : item.content.endsWith(".pdf")
-            ? "fetch"
-            : "image";
+              ? "fetch"
+              : "image";
           link.onerror = () =>
             console.error(`Wait Your Content Is Loading ${url}`);
           document.head.appendChild(link);
@@ -1741,12 +1808,21 @@ const Preview = () => {
       setNews(cache.news.data);
       return;
     }
+
     try {
-      // Ensure rssFeed is an array
-      const rssFeedValues = Array.isArray(settings.ticker.rssFeed)
-        ? settings.ticker.rssFeed
-        : [settings.ticker.rssFeed || "nbc"];
-      
+      // FIX: Properly access the RSS feed from settings
+      const rssFeedValue = settings?.ticker?.rssFeed;
+      console.log("RSS Feed setting:", rssFeedValue, "Full settings:", settings);
+
+      // Ensure rssFeed is an array and handle the value properly
+      const rssFeedValues = Array.isArray(rssFeedValue)
+        ? rssFeedValue
+        : rssFeedValue
+          ? [rssFeedValue]
+          : ["nbc"]; // Default fallback
+
+      console.log("Processing RSS feed values:", rssFeedValues);
+
       const feedUrls = rssFeedValues
         .map((value) => {
           const feed = rssFeedOptions.find((option) => option.value === value);
@@ -1757,15 +1833,15 @@ const Preview = () => {
           return feed.url;
         })
         .filter((url) => url);
-  
-      // Log a warning if no valid URLs are found, but avoid pushing a default unless explicitly desired
-      // if (feedUrls.length === 0) {
-      //   console.warn("No valid RSS feed URLs found. Falling back to default.");
-      //   feedUrls.push("https://feeds.feedburner.com/ndtvnews-top-stories");
-      // }
-  
-      console.log("Fetching news from RSS feeds:", feedUrls);
-  
+
+      console.log("Final feed URLs:", feedUrls);
+
+      // Rest of your existing code...
+      if (feedUrls.length === 0) {
+        console.warn("No valid RSS feed URLs found. Using default.");
+        feedUrls.push("https://feeds.nbcnews.com/nbcnews/public/news");
+      }
+
       const responses = await Promise.all(
         feedUrls.map(async (feedUrl) => {
           try {
@@ -1781,7 +1857,7 @@ const Preview = () => {
           }
         })
       );
-  
+
       let articles = [];
       responses.forEach((response) => {
         if (response.data.items) {
@@ -1796,7 +1872,7 @@ const Preview = () => {
           );
         }
       });
-  
+
       // Remove duplicates
       const seen = new Set();
       articles = articles.filter((article) => {
@@ -1805,7 +1881,7 @@ const Preview = () => {
         seen.add(key);
         return true;
       });
-  
+
       // Sort and limit articles
       articles = articles
         .sort((a, b) => {
@@ -1814,7 +1890,7 @@ const Preview = () => {
           return dateB - dateA;
         })
         .slice(0, 20);
-  
+
       // Fallback to news API if no articles are found
       if (articles.length === 0 && newsApiKey) {
         const fallbackResponse = await axios.get(
@@ -1831,7 +1907,7 @@ const Preview = () => {
             source: article.source.name,
           }));
       }
-  
+
       cache.news.data = articles;
       cache.news.timestamp = now;
       setNews(articles);
@@ -1839,8 +1915,7 @@ const Preview = () => {
       console.error("Error fetching news:", error);
       setNews([]);
     }
-  }, [settings.ticker.rssFeed, newsApiKey]);
-  
+  }, [settings?.ticker?.rssFeed, newsApiKey]); // FIX: Use optional chaining in dependencies
   const updateVisibleItems = useCallback(
     (layout, groupedContent, index) => {
       const layoutConfig =
@@ -1988,27 +2063,57 @@ const Preview = () => {
   const fetchData = useCallback(
     async (source = "unknown") => {
       const now = Date.now();
-      const minInterval = 60 * 1000; // 1 minute
+      const minInterval = 60 * 1000;
       if (now - lastFetchRef.current < minInterval) {
         console.log(`fetchData throttled (source: ${source})`);
         return;
       }
       lastFetchRef.current = now;
 
-      setIsLoading(true);
+      // Don't show loading for background fetches
+      const isBackgroundFetch = source === "polling" || source.includes("socket");
+      if (!isBackgroundFetch) {
+        setIsLoading(true);
+      }
+
       try {
         const response = await axios.post(
           `${apiBaseUrl}/api/upload/preview/${url}`,
           { timeout: 10000 }
         );
+
         if (response.data) {
+          const content = response.data.url_content || [];
+          const activeContent = getActiveContent(content);
+
+          // NEW: Create stable content fingerprint (ignore metadata changes)
+          const createFingerprint = (items) =>
+            items.map(item => `${item.content}|${item.layout}|${item.time}`).join('::');
+
+          const newFingerprint = createFingerprint(activeContent);
+          const oldFingerprint = createFingerprint(mediaContent);
+
+          if (newFingerprint === oldFingerprint) {
+            console.log(`📌 Content unchanged (${source}), preserving state`);
+
+            // Only update settings, don't reset anything else
+            setSettings(response.data.settings || defaultSettings);
+            setCustomTicker(response.data.custom_ticker || null);
+
+            if (!isBackgroundFetch) {
+              setIsLoading(false);
+            }
+            return; // EXIT EARLY - Critical!
+          }
+
+          console.log(`🔄 Content changed (${source}), updating...`);
+
+          // Rest of your existing logic...
           const cacheKey = `preview_${url}`;
           localStorage.setItem(cacheKey, JSON.stringify(response.data));
-          const content = response.data.url_content || [];
           setAllContent(content);
-          const activeContent = getActiveContent(content);
           setMediaContent(activeContent);
-          console.log("Fetched content:", activeContent);
+
           if (activeContent.length > 0) {
             setCurrentIndex(0);
             const firstLayout = activeContent[0].layout || "single";
@@ -2017,45 +2122,24 @@ const Preview = () => {
             updateVisibleItems(firstLayout, groupedContent, 0);
             preloadMedia(activeContent);
           } else {
-            console.warn("No active content available, using fallback");
             setVisibleItems([fallbackItem]);
           }
-          const isUrlEnabled = response.data.isEnabled === true;
-          setIsEnabled(isUrlEnabled);
-          setScheduledAt(
-            response.data.scheduledAt
-              ? new Date(response.data.scheduledAt)
-              : null
-          );
-          setExpiresAt(
-            response.data.expiresAt ? new Date(response.data.expiresAt) : null
-          );
+
+          setIsEnabled(response.data.isEnabled === true);
+          setScheduledAt(response.data.scheduledAt ? new Date(response.data.scheduledAt) : null);
+          setExpiresAt(response.data.expiresAt ? new Date(response.data.expiresAt) : null);
           setCustomTicker(response.data.custom_ticker || null);
-          const fetchedSettings = response.data.settings || defaultSettings;
-          setSettings(fetchedSettings);
-          console.log(fetchedSettings, " fetched settings");
-          
-        } else {
-          console.warn("No data in response, using fallback");
-          setVisibleItems([fallbackItem]);
+          setSettings(response.data.settings || defaultSettings);
         }
       } catch (error) {
-        console.error(
-          `Error fetching preview content (source: ${source}):`,
-          error
-        );
-        setVisibleItems([fallbackItem]);
+        console.error(`Error fetching preview content (source: ${source}):`, error);
       } finally {
-        setIsLoading(false);
+        if (!isBackgroundFetch) {
+          setIsLoading(false);
+        }
       }
     },
-    [
-      url,
-      getActiveContent,
-      groupMediaByLayout,
-      preloadMedia,
-      updateVisibleItems,
-    ]
+    [url, getActiveContent, groupMediaByLayout, preloadMedia, updateVisibleItems, mediaContent]
   );
 
   const handleSocketUpdate = useCallback(
@@ -2071,6 +2155,12 @@ const Preview = () => {
       const content = data.url_content || [];
       setAllContent(content);
       const activeContent = getActiveContent(content);
+      if (JSON.stringify(activeContent) === JSON.stringify(mediaContent)) {
+        console.log("No changes, skipping");
+        setIsLoading(false);
+        return;
+      }
+
       setMediaContent(activeContent);
       const isUrlEnabled = data.isEnabled === true;
       setIsEnabled(isUrlEnabled);
@@ -2104,17 +2194,17 @@ const Preview = () => {
 
   const connectSocket = useCallback(() => {
     if (!isSessionActive) {
-      console.log(
-        "Session is inactive (replaced), skipping connection attempt"
-      );
-      return; // NEW: Block any further connection attempts
+      console.log("Session inactive, skipping socket connection");
+      return;
     }
 
-    // Disconnect existing socket properly
+    if (socketRef.current?.connected) {
+      console.log("Socket already connected, skipping");
+      return;
+    }
+
     if (socketRef.current) {
-      console.log("Socket already exists, disconnecting previous...");
-      socketRef.current.isBeingReplaced = false; // Reset replacement flag
-      socketRef.current.removeAllListeners(); // Remove all listeners first
+      socketRef.current.removeAllListeners();
       socketRef.current.disconnect();
       socketRef.current = null;
     }
@@ -2122,190 +2212,78 @@ const Preview = () => {
     const socket = io(apiBaseUrl, {
       query: { url },
       auth: { token: localStorage.getItem("jwt_token") },
-      reconnection: false, // CHANGED: Disable auto-reconnection to prevent loops; handle manually if needed
-      reconnectionAttempts: 0, // NEW: No attempts
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-      forceNew: true, // Force a new connection
+      reconnection: true,
+      reconnectionAttempts: Infinity,   // Keep retrying forever on TV
+      reconnectionDelay: 3000,
+      reconnectionDelayMax: 30000,
+      timeout: 30000,
+      forceNew: true,
+      // transports: ["websocket", "polling"],
     });
 
-    // Initialize flags
-    socket.isBeingReplaced = false;
-    socket.replacementAlertShown = false;
-
+    // ── Join the room as soon as we connect (or reconnect) ──────────────
     socket.on("connect", () => {
-      console.log(
-        `Socket.IO connected for URL: ${url}, Socket ID: ${socket.id}`
-      );
-
-      // Stop polling if it's running
-      if (pollingRef.current) {
-        console.log("Stopping polling due to successful Socket.IO connection");
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-
-      // Join the room
+      console.log("✅ Socket connected:", socket.id);
       socket.emit(
         "join",
         { url, token: localStorage.getItem("jwt_token") },
         (response) => {
           if (response?.error) {
-            console.error("Join error:", response.error);
-            setIsLoading(false);
-            setVisibleItems([{ ...fallbackItem, content: response.error }]);
+            console.error("❌ Failed to join room:", response.error);
           } else {
-            console.log("Successfully joined room:", response);
+            console.log(`🏠 Joined room: ${url}`);
+            // Pull fresh data immediately after (re)joining
+            fetchData("socket-connect");
           }
         }
       );
     });
 
-    socket.on("init", (data) => {
-      console.log("Received init data:", data);
-      handleSocketUpdate(data, "init");
-    });
-
+    // ── Content update pushed by the server ─────────────────────────────
     socket.on("update", (data) => {
-      console.log("Received update data:", data);
+      console.log("📡 Received socket 'update' event");
       handleSocketUpdate(data, "update");
     });
 
-    socket.on("delete", (data) => {
-      console.log("Received delete data:", data);
-      if (data.url === url) {
-        // Clear all state
-        resetToFallbackState();
-
-        Swal.fire({
-          title: "URL Deleted",
-          text: "This URL has been deleted and is no longer available.",
-          icon: "info",
-          timer: 2500, // Auto close after 2 seconds
-          showConfirmButton: false, // Hide OK button
-          timerProgressBar: true, // Optional: show a progress bar
-        });
-      }
+    // ── Initial data push on first join ─────────────────────────────────
+    socket.on("init", (data) => {
+      console.log("📡 Received socket 'init' event");
+      handleSocketUpdate(data, "init");
     });
 
-    socket.on("session_replaced", (data) => {
-      console.log("Session replaced:", data);
-
-      // Prevent reconnection loops by marking this socket as replaced
-      socket.isBeingReplaced = true;
-
-      // Clear all state immediately
-      resetToFallbackState();
-
-      // NEW: Mark session as inactive to block future connectSocket calls
-      setIsSessionActive(false);
-
-      // Show notification only once
-      if (!socket.replacementAlertShown) {
-        socket.replacementAlertShown = true;
-
-        Swal.fire({
-          title: "Session Replaced",
-          text:
-            data.message ||
-            "This URL is now being accessed on another device. Your session has been closed.",
-          icon: "warning",
-          confirmButtonText: "OK",
-          allowOutsideClick: false,
-          showConfirmButton: true,
-          timer: undefined, // Remove any auto-close timer
-        }).then(() => {
-          // Clean disconnect without triggering reconnection
-          if (socket.connected) {
-            socket.removeAllListeners();
-            socket.disconnect();
-          }
-
-          // Clear polling to prevent any restart attempts
-          if (pollingRef.current) {
-            clearInterval(pollingRef.current);
-            pollingRef.current = null;
-          }
-
-          console.log(
-            "Session replacement handled; no further connections allowed"
-          );
-        });
-      }
+    // ── Reconnection handling ────────────────────────────────────────────
+    socket.on("reconnect", (attempt) => {
+      console.log(`🔄 Socket reconnected (attempt ${attempt})`);
+      // Re-fetch in case we missed updates while disconnected
+      fetchData("socket-reconnect");
     });
 
-    socket.on("error", (error) => {
-      console.error("Socket.IO error:", error.message || error);
-      setIsLoading(false);
-      setVisibleItems([
-        {
-          ...fallbackItem,
-          content: error.message || "Connection error occurred",
-        },
-      ]);
+    socket.on("reconnect_attempt", (attempt) => {
+      console.log(`⏳ Socket reconnect attempt ${attempt}…`);
     });
 
-    socket.on("connect_error", (error) => {
-      console.error("Socket.IO connection error:", error.message);
-
-      // Don't start polling if this socket was replaced
-      if (socket.isBeingReplaced || !isSessionActive) {
-        // UPDATED: Check persistent flag
-        console.log(
-          "Socket was replaced or inactive, not starting polling on connect_error"
-        );
-        return;
-      }
-
-      // Start polling as fallback if not already running
-      if (!pollingRef.current) {
-        console.log("Starting polling due to Socket.IO connection error");
-        pollingRef.current = setInterval(() => {
-          fetchData("polling");
-        }, 30 * 1000);
-      }
+    socket.on("reconnect_error", (err) => {
+      console.error("❌ Socket reconnect error:", err.message);
     });
 
     socket.on("disconnect", (reason) => {
-      console.log("Socket.IO disconnected:", reason);
-
-      // Don't start polling if this socket was replaced or inactive
-      if (socket.isBeingReplaced || !isSessionActive) {
-        // UPDATED: Check persistent flag
-        console.log("Socket was replaced or inactive, not starting polling");
-        return;
-      }
-
-      // Start polling if disconnected unexpectedly (not manual)
-      if (
-        reason !== "io client disconnect" &&
-        reason !== "client namespace disconnect" &&
-        !pollingRef.current
-      ) {
-        console.log("Starting polling due to unexpected disconnect");
-        pollingRef.current = setInterval(() => {
-          fetchData("polling");
-        }, 30 * 1000);
+      console.warn("⚠️ Socket disconnected:", reason);
+      // "io server disconnect" means the server kicked us — reconnect manually
+      if (reason === "io server disconnect") {
+        socket.connect();
       }
     });
 
-    socketRef.current = socket;
+    socket.on("connect_error", (err) => {
+      console.error("❌ Socket connection error:", err.message);
+    });
 
-    // Cleanup function
-    return () => {
-      console.log("Cleaning up Socket.IO connection");
-      if (socket) {
-        socket.removeAllListeners();
-        socket.disconnect();
-      }
-      if (pollingRef.current) {
-        console.log("Clearing polling interval");
-        clearInterval(pollingRef.current);
-        pollingRef.current = null;
-      }
-    };
-  }, [url, handleSocketUpdate, fetchData, isSessionActive]); // UPDATED: Add isSessionActive to dependencies
+    socket.on("error", (err) => {
+      console.error("❌ Socket error:", err);
+    });
+
+    socketRef.current = socket;
+  }, [url, handleSocketUpdate, fetchData, isSessionActive]);
 
   // Helper function to reset state (unchanged)
   function resetToFallbackState() {
@@ -2339,7 +2317,15 @@ const Preview = () => {
     };
   }, [resetControlTimeout]);
 
+  // Add this ref at the top with other refs
+  const isInitializedRef = useRef(false);
+
+  // Replace the initialization useEffect
   useEffect(() => {
+    // Only run once on mount
+    if (isInitializedRef.current) return;
+    isInitializedRef.current = true;
+
     const loadData = async () => {
       setIsLoading(true);
       try {
@@ -2351,100 +2337,116 @@ const Preview = () => {
         setIsLoading(false);
       }
     };
+
     loadData();
-    const cleanupSocket = connectSocket();
-    return cleanupSocket;
-  }, [fetchData, fetchWeather, fetchNews, connectSocket]);
+    connectSocket();
+
+    // Cleanup on unmount only
+    return () => {
+      console.log("Component unmounting - final cleanup");
+      isInitializedRef.current = false;
+
+      if (socketRef.current) {
+        socketRef.current.removeAllListeners();
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
+
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, []); // ← Empty dependency array - run once only!
 
   useEffect(() => {
     getUserLocation();
   }, [getUserLocation]);
 
-// Replace the slideshow useEffect in Preview component
+  // Replace the slideshow useEffect in Preview component
 
-useEffect(() => {
-  if (mediaContent.length === 0 || !isEnabled || isPaused) {
-    setActiveSlideshow(false);
-    if (mediaContent.length === 0 || !isEnabled) {
-      setVisibleItems([fallbackItem]);
-    }
-    return;
-  }
-
-  setActiveSlideshow(true);
-  const currentItemIndex = currentIndex % mediaContent.length;
-  const currentItem = mediaContent[currentItemIndex] || fallbackItem;
-  
-  if (
-    !currentItem ||
-    !Number.isFinite(currentItem.time) ||
-    currentItem.time <= 0
-  ) {
-    console.warn("Invalid current item or time, using fallback", {
-      currentIndex,
-      item: currentItem,
-    });
-    setVisibleItems([fallbackItem]);
-    return;
-  }
-
-  const currentLayout = currentItem.layout || "single";
-  setCurrentLayout(currentLayout);
-  const layoutConfig =
-    layoutOptions.find((option) => option.id === currentLayout) ||
-    layoutOptions[0];
-  const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-  const groupedContent = groupMediaByLayout(mediaContent);
-  updateVisibleItems(currentLayout, groupedContent, currentIndex);
-
-  // NEW: Check if current item is a PDF
-  const isPdfContent = currentItem.content?.endsWith('.pdf');
-  
-  // NEW: For single PDF in single layout, don't set timer to avoid restart
-  if (isPdfContent && mediaContent.length === 1 && currentLayout === 'single') {
-    console.log('Single PDF detected - continuous scroll mode, no slideshow timer');
-    return; // Don't set any timer, let PDF scroll infinitely
-  }
-
-  const delay = currentItem.time * 1000;
-
-  const timer = setTimeout(() => {
-    const nextIndex = currentIndex + itemsPerPage;
-    
-    // NEW: If we're looping back to the same single item, don't trigger re-render
-    if (nextIndex >= mediaContent.length) {
-      if (mediaContent.length === 1 && currentIndex === 0) {
-        console.log('Already showing single item, skipping index update');
-        return; // Don't update state if we're already showing the only item
+  useEffect(() => {
+    if (mediaContent.length === 0 || !isEnabled || isPaused) {
+      setActiveSlideshow(false);
+      if (mediaContent.length === 0 || !isEnabled) {
+        setVisibleItems([fallbackItem]);
       }
-      
-      setCurrentIndex(0);
-      const firstLayout = mediaContent[0]?.layout || "single";
-      setCurrentLayout(firstLayout);
-      updateVisibleItems(firstLayout, groupedContent, 0);
-      console.log("Completed one loop, relying on Socket.IO for updates");
-    } else {
-      setCurrentIndex(nextIndex);
-      const nextItem = mediaContent[nextIndex] || fallbackItem;
-      const nextLayout = nextItem.layout || "single";
-      setCurrentLayout(nextLayout);
-      updateVisibleItems(nextLayout, groupedContent, nextIndex);
+      return;
     }
-  }, delay);
 
-  return () => {
-    console.log("Clearing slideshow timer");
-    clearTimeout(timer);
-  };
-}, [
-  mediaContent,
-  currentIndex,
-  isPaused,
-  isEnabled,
-  groupMediaByLayout,
-  updateVisibleItems,
-]);
+    setActiveSlideshow(true);
+    const currentItemIndex = currentIndex % mediaContent.length;
+    const currentItem = mediaContent[currentItemIndex] || fallbackItem;
 
+    if (
+      !currentItem ||
+      !Number.isFinite(currentItem.time) ||
+      currentItem.time <= 0
+    ) {
+      console.warn("Invalid current item or time, using fallback", {
+        currentIndex,
+        item: currentItem,
+      });
+      setVisibleItems([fallbackItem]);
+      return;
+    }
+
+    const currentLayout = currentItem.layout || "single";
+    setCurrentLayout(currentLayout);
+    const layoutConfig =
+      layoutOptions.find((option) => option.id === currentLayout) ||
+      layoutOptions[0];
+    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
+    const groupedContent = groupMediaByLayout(mediaContent);
+    updateVisibleItems(currentLayout, groupedContent, currentIndex);
+
+    // NEW: Check if current item is a PDF
+    const isPdfContent = currentItem.content?.endsWith('.pdf');
+
+    // NEW: For single PDF in single layout, don't set timer to avoid restart
+    if (isPdfContent && mediaContent.length === 1 && currentLayout === 'single') {
+      console.log('Single PDF detected - continuous scroll mode, no slideshow timer');
+      return; // Don't set any timer, let PDF scroll infinitely
+    }
+
+    const delay = currentItem.time * 1000;
+
+    const timer = setTimeout(() => {
+      const nextIndex = currentIndex + itemsPerPage;
+
+      // NEW: If we're looping back to the same single item, don't trigger re-render
+      if (nextIndex >= mediaContent.length) {
+        if (mediaContent.length === 1 && currentIndex === 0) {
+          console.log('Already showing single item, skipping index update');
+          return; // Don't update state if we're already showing the only item
+        }
+
+        setCurrentIndex(0);
+        const firstLayout = mediaContent[0]?.layout || "single";
+        setCurrentLayout(firstLayout);
+        updateVisibleItems(firstLayout, groupedContent, 0);
+        console.log("Completed one loop, relying on Socket.IO for updates");
+      } else {
+        setCurrentIndex(nextIndex);
+        const nextItem = mediaContent[nextIndex] || fallbackItem;
+        const nextLayout = nextItem.layout || "single";
+        setCurrentLayout(nextLayout);
+        updateVisibleItems(nextLayout, groupedContent, nextIndex);
+      }
+    }, delay);
+
+    return () => {
+      console.log("Clearing slideshow timer");
+      clearTimeout(timer);
+    };
+  }, [
+    mediaContent,
+    currentIndex,
+    isPaused,
+    isEnabled,
+    groupMediaByLayout,
+    updateVisibleItems,
+  ]);
   useEffect(() => {
     const now = new Date();
     if (scheduledAt && now < scheduledAt) {
@@ -2489,70 +2491,7 @@ useEffect(() => {
     }
   }, [scheduledAt, expiresAt, isEnabled, fetchData]);
 
-  useEffect(() => {
-    if (mediaContent.length === 0 || !isEnabled || isPaused) {
-      setActiveSlideshow(false);
-      if (mediaContent.length === 0 || !isEnabled) {
-        setVisibleItems([fallbackItem]);
-      }
-      return;
-    }
 
-    setActiveSlideshow(true);
-    const currentItemIndex = currentIndex % mediaContent.length;
-    const currentItem = mediaContent[currentItemIndex] || fallbackItem;
-    if (
-      !currentItem ||
-      !Number.isFinite(currentItem.time) ||
-      currentItem.time <= 0
-    ) {
-      console.warn("Invalid current item or time, using fallback", {
-        currentIndex,
-        item: currentItem,
-      });
-      setVisibleItems([fallbackItem]);
-      return;
-    }
-
-    const currentLayout = currentItem.layout || "single";
-    setCurrentLayout(currentLayout);
-    const layoutConfig =
-      layoutOptions.find((option) => option.id === currentLayout) ||
-      layoutOptions[0];
-    const itemsPerPage = layoutConfig.cols * layoutConfig.rows;
-    const delay = currentItem.time * 1000;
-    const groupedContent = groupMediaByLayout(mediaContent);
-    updateVisibleItems(currentLayout, groupedContent, currentIndex);
-
-    const timer = setTimeout(() => {
-      const nextIndex = currentIndex + itemsPerPage;
-      if (nextIndex >= mediaContent.length) {
-        setCurrentIndex(0);
-        const firstLayout = mediaContent[0]?.layout || "single";
-        setCurrentLayout(firstLayout);
-        updateVisibleItems(firstLayout, groupedContent, 0);
-        console.log("Completed one loop, relying on Socket.IO for updates");
-      } else {
-        setCurrentIndex(nextIndex);
-        const nextItem = mediaContent[nextIndex] || fallbackItem;
-        const nextLayout = nextItem.layout || "single";
-        setCurrentLayout(nextLayout);
-        updateVisibleItems(nextLayout, groupedContent, nextIndex);
-      }
-    }, delay);
-
-    return () => {
-      console.log("Clearing slideshow timer");
-      clearTimeout(timer);
-    };
-  }, [
-    mediaContent,
-    currentIndex,
-    isPaused,
-    isEnabled,
-    groupMediaByLayout,
-    updateVisibleItems,
-  ]);
 
   return (
     <div className="relative flex justify-center items-center w-screen h-screen bg-black overflow-hidden">
@@ -2633,11 +2572,10 @@ useEffect(() => {
               className="news-ticker"
               style={{
                 animationName: "marquee",
-                animationDuration: `${
-                  customTicker
-                    ? settings.ticker.speed * 0.5
-                    : settings.ticker.speed
-                }s`, // Make custom ticker 2x faster
+                animationDuration: `${customTicker
+                  ? settings.ticker.speed * 0.5
+                  : settings.ticker.speed
+                  }s`, // Make custom ticker 2x faster
                 animationTimingFunction: "linear",
                 animationIterationCount: "infinite",
                 fontSize: `${settings.ticker.fontSize}px`,
@@ -2712,4 +2650,4 @@ useEffect(() => {
   );
 };
 
-export default Preview;
+export default Preview1;

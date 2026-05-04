@@ -17,6 +17,7 @@ const { getIO } = require('../../../Socket_IO');
 const PDFDocument = require("pdfkit");
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
+const util = require('util');
 const secret_key = "TickerApplication";
 const encryptedLimit = "e7ZLZFFrXSiP/1U2FOvj4w==";
 const secretUrlKey = "9ATicker";
@@ -166,6 +167,75 @@ async function convertTxtToPdf(inputPath, outputPath) {
     return false;
   }
 }
+
+async function convertPDFToImages(inputPath, outputDir, baseName) {
+  if (!fs.existsSync(outputDir)) {
+    fs.mkdirSync(outputDir, { recursive: true });
+  }
+ 
+  const ext = path.extname(inputPath).toLowerCase();
+  let pdfPath = inputPath;
+ 
+  // Step 1: Convert Office files to PDF first
+  if (['.ppt', '.pptx', '.doc', '.docx'].includes(ext)) {
+    const pdfFileName = `${baseName}.pdf`;
+    pdfPath = path.join(outputDir, pdfFileName);
+ 
+    const cmd = `soffice --headless --convert-to pdf --outdir "${outputDir.replace(/\\/g, '/')}" "${inputPath.replace(/\\/g, '/')}"`;
+    await execAsync(cmd);
+ 
+    if (!fs.existsSync(pdfPath)) throw new Error('Failed to convert to PDF');
+  }
+ 
+  // Step 2: Convert PDF (or direct PDF) to optimized WebP images
+  const outputPattern = path.join(outputDir, `${baseName}-%03d.webp`);
+  const magickCmd = `magick "${pdfPath}" -density 220 -background white  -colorspace sRGB -quality 82 -resize 1920x1080> -strip -interlace Plane "${outputPattern}"`; 
+  await execAsync(magickCmd, { maxBuffer: 1024 * 1024 * 20 });
+ 
+  // Get generated images
+  const imageFiles = fs.readdirSync(outputDir)
+    .filter(f => f.startsWith(baseName) && f.endsWith('.webp'))
+    .sort((a, b) => {
+      const numA = parseInt(a.match(/\d+/)?.[0] || 0);
+      const numB = parseInt(b.match(/\d+/)?.[0] || 0);
+      return numA - numB;
+    });
+ 
+  // Cleanup intermediate PDF
+  if (pdfPath !== inputPath && fs.existsSync(pdfPath)) {
+    try { fs.unlinkSync(pdfPath); } catch (e) { console.warn('Failed to delete temp PDF'); }
+  }
+ 
+  return imageFiles.map(f => `/${path.basename(outputDir)}/${f}`);
+}
+ 
+// ─── Helper: convert a PDF to WebP slides and return mediaData entries ─────────
+// Used by both /upload and /updateUrlContent for all non-AI PDF paths.
+async function buildWebPSlides({ pdfPath, outputDir, baseName, parsedTime, schedule, layout, custom_ticker, originalFormat, username, Url_Name }) {
+  const slideImages = await convertPDFToImages(pdfPath, outputDir, baseName);
+ 
+  if (slideImages.length === 0) {
+    throw new Error(`Failed to convert PDF to WebP images (baseName: ${baseName})`);
+  }
+ 
+  const groupId = uuidv4();
+ 
+  return slideImages.map((slidePath, slideIndex) => {
+    const slideFilename = path.basename(slidePath);
+    return {
+      content: `/${username}/${Url_Name}/${slideFilename}`,
+      time: parsedTime,
+      schedule,
+      fileName: slideFilename,
+      layout: "single",
+      custom_ticker,
+      originalFormat,
+      groupId,
+      slideNumber: slideIndex,
+    };
+  });
+}
+
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     try {
@@ -227,6 +297,8 @@ const upload = multer({
   },
 }).any();
 
+// POST /upload
+// ─────────────────────────────────────────────────────────────────────────────
 router.post("/upload", licenseMiddleware, (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -238,29 +310,30 @@ router.post("/upload", licenseMiddleware, (req, res) => {
       }
       if (err.code === "LIMIT_UNSUPPORTED_FILE_TYPE") {
         console.error("Invalid file type error:", err.message);
-        return res.status(400).json({
-          message: err.message,
-        });
+        return res.status(400).json({ message: err.message });
       }
       logger.log("error", `Error occurred: ${err.message}`);
       return res.status(500).json({ message: err.message });
     }
+ 
     console.log("req.body:", req.body);
     console.log("req.files:", req.files);
+ 
     let userId = req.body.userId;
-    if (Array.isArray(userId)) {
-      userId = userId[0];
-    }
+    if (Array.isArray(userId)) userId = userId[0];
+ 
     const method = req.method;
     const apiName = req.originalUrl;
     const Url_Name = req.body.Url_Name;
     const custom_ticker = req.body.custom_ticker;
     const links = Array.isArray(req.body.links) ? req.body.links : [];
     const token = req.headers.authorization;
+ 
     if (!token) {
       logger.log("error", `Error occurred: Missing Token`);
       return res.status(401).json({ message: "Unauthorized: Token is missing" });
     }
+ 
     try {
       const decoded = jwt.verify(token, secret_key);
       const accountId = 1;
@@ -268,60 +341,49 @@ router.post("/upload", licenseMiddleware, (req, res) => {
         where: { id: decoded.userId },
         include: [{ model: db.Account, attributes: ['accountName'] }],
       });
+ 
       if (!user || !user.Account) {
         return res.status(400).json({ message: "User or account not found" });
       }
+ 
       const accountName = user.Account.accountName;
+ 
       if (links.length === 0) {
         return res.status(400).json({
           message: "No content provided. Please add at least one link or file.",
         });
       }
+ 
       const MAX_URL_LIMIT = 10;
-      const accountUrlCount = await db.TickerData.count({
-        where: { account_id: accountId },
-      });
+      const accountUrlCount = await db.TickerData.count({ where: { account_id: accountId } });
       if (accountUrlCount >= MAX_URL_LIMIT) {
         return res.status(403).json({
           message: "Account has reached the maximum allowed URLs. Please contact Admin or delete an existing URL to create a new one.",
         });
       }
+ 
       if (!Url_Name || Url_Name.trim() === "") {
         return res.status(400).json({ message: "Url_Name is required" });
       }
-      const reservedKeywords = [
-        "login",
-        "logout",
-        "admin",
-        "admin-dashboard",
-        "home",
-        "settings",
-        "register",
-        "editurl",
-      ];
-            
-      // Check for reserved keywords (case-insensitive)
+ 
+      const reservedKeywords = ["login", "logout", "admin", "admin-dashboard", "home", "settings", "register", "editurl"];
       if (reservedKeywords.includes(Url_Name.toLowerCase())) {
         return res.status(400).json({
           message: `The Url_Name "${Url_Name}" is reserved and cannot be used. Please choose a different name.`,
         });
       }
-      
-      // Check if the URL name already exists for the account
-      const existingUrl = await db.TickerData.findOne({
-        where: { Url_Name, account_id: accountId },
-      });
-      
+ 
+      const existingUrl = await db.TickerData.findOne({ where: { Url_Name, account_id: accountId } });
       if (existingUrl) {
         return res.status(400).json({
           message: `The Url_Name "${Url_Name}" is already taken for this account. Please choose a different name.`,
         });
       }
-   
+ 
       const mediaData = [];
       const accountUploadDir = `./upload-service/uploads/${username}`;
       const flaskApiUrl = "http://127.0.0.1:5052/api/summarize";
-     
+ 
       for (let i = 0; i < links.length; i++) {
         const {
           link,
@@ -332,47 +394,52 @@ router.post("/upload", licenseMiddleware, (req, res) => {
           layout,
           custom_ticker,
         } = links[i];
-        let contentPath = link;
+ 
         const parsedTime = parseInt(time, 10);
         if (!parsedTime || isNaN(parsedTime) || parsedTime <= 0) {
           return res.status(400).json({ message: `Please enter a valid time for item ${i + 1}` });
         }
-        if (
-          !link &&
-          !req.files.some((f) => f.fieldname === `links[${i}][file]`)
-        ) {
-          return res.status(400).json({
-            message: `No link or file provided for item ${i + 1}.`,
-          });
-        }
+ 
         const file = req.files.find((f) => f.fieldname === `links[${i}][file]`);
-       
-        // Handle PPT/PPTX files - convert to multiple slide images
+ 
+        if (!link && !file) {
+          return res.status(400).json({ message: `No link or file provided for item ${i + 1}.` });
+        }
+ 
+        // ── Validate & normalise schedule ──────────────────────────────────────
+        const validatedSchedule = { ...schedule };
+        if (validatedSchedule.startDate)   validatedSchedule.startDate   = new Date(validatedSchedule.startDate).toISOString();
+        if (validatedSchedule.endDate)     validatedSchedule.endDate     = new Date(validatedSchedule.endDate).toISOString();
+        if (validatedSchedule.repeatUntil) validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
+        if (typeof validatedSchedule.weeklyDays === "string") {
+          try { validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays); }
+          catch (e) { validatedSchedule.weeklyDays = []; }
+        }
+        if (!Array.isArray(validatedSchedule.weeklyDays)) validatedSchedule.weeklyDays = [];
+ 
+        const outputDir = path.join(accountUploadDir, Url_Name);
+ 
+        // ── PPT / PPTX ─────────────────────────────────────────────────────────
         if (file && (
           file.mimetype === "application/vnd.ms-powerpoint" ||
           file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )) {
           console.log(`Processing PPT file: ${file.originalname}`);
           const originalPath = file.path;
-          const outputDir = path.join(accountUploadDir, Url_Name);
           const baseFileName = path.parse(file.originalname).name;
           const groupId = uuidv4();
           const slideImages = await convertPptToImages(originalPath, outputDir, baseFileName);
-         
+ 
           if (slideImages.length === 0) {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to slide images`,
-            });
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to slide images` });
           }
-         
-          console.log(`Adding ${slideImages.length} slide images to mediaData`);
-          // Add ALL slide images as separate media items
+ 
           for (const [slideIndex, slidePath] of slideImages.entries()) {
             const slideFilename = path.basename(slidePath);
             mediaData.push({
               content: `/${username}/${Url_Name}/${slideFilename}`,
-              time: parsedTime, // Use the same time for each slide
-              schedule,
+              time: parsedTime,
+              schedule: validatedSchedule,
               fileName: slideFilename,
               layout: "single",
               custom_ticker,
@@ -380,187 +447,166 @@ router.post("/upload", licenseMiddleware, (req, res) => {
               groupId,
               slideNumber: slideIndex,
             });
-            console.log(`Added slide: ${slideFilename}`);
           }
-         
-          // Delete the original PPT file after processing all slides
-          try {
-            fs.unlinkSync(originalPath);
-            logger.log("info", `Deleted original PPT file: ${originalPath}`);
-          } catch (unlinkError) {
-            logger.log("error", `Failed to delete original PPT file ${originalPath}: ${unlinkError.message}`);
-          }
-          continue; // Skip the rest of the loop for this file since we've processed all slides
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original PPT file ${originalPath}: ${e.message}`); }
+ 
+          continue;
         }
-        // Handle DOC/DOCX files
-        else if (file && (
+ 
+        // ── DOC / DOCX → PDF → WebP slides ────────────────────────────────────
+        if (file && (
           file.mimetype === "application/msword" ||
           file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )) {
           const originalPath = file.path;
           const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
           const success = await convertDocToPdf(originalPath, pdfPath);
-          if (success) {
-            const pdfFilename = path.basename(pdfPath);
-            contentPath = `/${username}/${Url_Name}/${pdfFilename}`;
-            if (file.mimetype === "application/pdf" && analyzeWithAI === "true") {
-              try {
-                const pdfBuffer = fs.readFileSync(pdfPath);
-                const base64Pdf = pdfBuffer.toString("base64");
-                const response = await axios.post(
-                  flaskApiUrl,
-                  { pdf: base64Pdf, filename: pdfFilename },
-                  { headers: { "Content-Type": "application/json" } }
-                );
-                if (response.data && response.data.summary) {
-                  mediaData.push({
-                    content: contentPath,
-                    time: parsedTime,
-                    summary: response.data.summary,
-                    schedule,
-                    fileName: pdfFilename,
-                    layout,
-                    custom_ticker,
-                    originalFormat: path.extname(file.originalname).substring(1),
-                  });
-                  continue;
-                }
-              } catch (flaskError) {
-                console.error("Failed to summarize PDF:", flaskError);
-              }
-            }
-            mediaData.push({
-              content: contentPath,
-              time: parsedTime,
-              schedule,
-              fileName: pdfFilename,
-              layout,
-              custom_ticker,
-              originalFormat: path.extname(file.originalname).substring(1),
-            });
-            try {
-              fs.unlinkSync(originalPath);
-              logger.log("info", `Deleted original DOC file: ${originalPath}`);
-            } catch (unlinkError) {
-              logger.log("error", `Failed to delete original DOC file ${originalPath}: ${unlinkError.message}`);
-            }
-          } else {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to PDF`,
-            });
+ 
+          if (!success) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to PDF` });
           }
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original DOC file ${originalPath}: ${e.message}`); }
+ 
+          const baseName = path.parse(file.originalname).name;
+          const slides = await buildWebPSlides({
+            pdfPath, outputDir, baseName, parsedTime,
+            schedule: validatedSchedule, layout, custom_ticker,
+            originalFormat: path.extname(file.originalname).toLowerCase().substring(1),
+            username, Url_Name,
+          });
+ 
+          if (slides.length === 0) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to WebP images` });
+          }
+ 
+          // convertPDFToImages already cleans up the intermediate PDF
+          mediaData.push(...slides);
+          console.log(`Added ${slides.length} WebP slides from DOC: ${file.originalname}`);
+          continue;
         }
-        // Handle TXT files
-        else if (file && file.mimetype === "text/plain") {
+ 
+        // ── TXT → PDF → WebP slides ────────────────────────────────────────────
+        if (file && file.mimetype === "text/plain") {
           const originalPath = file.path;
           const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
           const success = await convertTxtToPdf(originalPath, pdfPath);
-          if (success) {
-            const pdfFilename = path.basename(pdfPath);
-            contentPath = `/${username}/${Url_Name}/${pdfFilename}`;
-            mediaData.push({
-              content: contentPath,
-              time: parsedTime,
-              schedule,
-              fileName: pdfFilename,
-              layout,
-              custom_ticker,
-              originalFormat: "txt",
-            });
-            try {
-              fs.unlinkSync(originalPath);
-              logger.log("info", `Deleted original TXT file: ${originalPath}`);
-            } catch (unlinkError) {
-              logger.log("error", `Failed to delete original TXT file ${originalPath}: ${unlinkError.message}`);
-            }
-          } else {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to PDF`,
-            });
+ 
+          if (!success) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to PDF` });
           }
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original TXT file ${originalPath}: ${e.message}`); }
+ 
+          const baseName = path.parse(file.originalname).name;
+          const slides = await buildWebPSlides({
+            pdfPath, outputDir, baseName, parsedTime,
+            schedule: validatedSchedule, layout, custom_ticker,
+            originalFormat: "txt",
+            username, Url_Name,
+          });
+ 
+          if (slides.length === 0) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to WebP images` });
+          }
+ 
+          mediaData.push(...slides);
+          console.log(`Added ${slides.length} WebP slides from TXT: ${file.originalname}`);
+          continue;
         }
-        // Handle other file types (images, videos, PDFs)
-        else if (link && link.startsWith("blob:") && file) {
-          contentPath = `/${username}/${Url_Name}/${file.filename}`;
-          if (file.mimetype === "application/pdf" && analyzeWithAI === "true") {
+ 
+        // ── Direct PDF upload ──────────────────────────────────────────────────
+        if (file && file.mimetype === "application/pdf") {
+          const pdfPath = file.path;
+          const baseName = path.parse(file.originalname).name;
+ 
+          // Branch A: AI summarisation (keep as PDF, send to Flask)
+          if (analyzeWithAI === "true") {
             try {
-              const pdfPath = path.join(accountUploadDir, Url_Name, file.filename);
-              if (fs.existsSync(pdfPath)) {
-                const pdfBuffer = fs.readFileSync(pdfPath);
-                const base64Pdf = pdfBuffer.toString("base64");
-                const response = await axios.post(
-                  flaskApiUrl,
-                  { pdf: base64Pdf, filename: file.filename },
-                  { headers: { "Content-Type": "application/json" } }
-                );
-                if (response.data && response.data.summary) {
-                  mediaData.push({
-                    content: contentPath,
-                    time: parsedTime,
-                    summary: response.data.summary,
-                    schedule,
-                    fileName,
-                    layout,
-                    custom_ticker,
-                    originalFormat: null,
-                  });
-                  continue;
-                }
-              } else {
-                console.error(`PDF file does not exist at path: ${pdfPath}`);
+              const pdfBuffer = fs.readFileSync(pdfPath);
+              const base64Pdf = pdfBuffer.toString("base64");
+              const response = await axios.post(
+                flaskApiUrl,
+                { pdf: base64Pdf, filename: file.filename },
+                { headers: { "Content-Type": "application/json" } }
+              );
+ 
+              if (response.data && response.data.summary) {
+                const contentPath = `/${username}/${Url_Name}/${file.filename}`;
+                mediaData.push({
+                  content: contentPath,
+                  time: parsedTime,
+                  summary: response.data.summary,
+                  schedule: validatedSchedule,
+                  fileName: file.filename,
+                  layout,
+                  custom_ticker,
+                  originalFormat: null,
+                });
+                continue;
               }
             } catch (flaskError) {
               console.error("Failed to summarize PDF:", flaskError);
+              // Fall through to WebP conversion below
             }
           }
-          mediaData.push({
-            content: contentPath,
-            time: parsedTime,
-            schedule,
-            fileName,
-            layout,
-            custom_ticker,
-            originalFormat: null,
+ 
+          // Branch B: No AI — convert to WebP slides
+          const slides = await buildWebPSlides({
+            pdfPath, outputDir, baseName, parsedTime,
+            schedule: validatedSchedule, layout, custom_ticker,
+            originalFormat: "pdf",
+            username, Url_Name,
           });
-        }
-        // Handle external links
-        else if (link && !link.startsWith("blob:")) {
-          contentPath = link;
-          mediaData.push({
-            content: contentPath,
-            time: parsedTime,
-            schedule,
-            fileName,
-            layout,
-            custom_ticker,
-            originalFormat: null,
-          });
-        }
-       
-        const validatedSchedule = { ...schedule };
-        if (validatedSchedule.startDate) {
-          validatedSchedule.startDate = new Date(validatedSchedule.startDate).toISOString();
-        }
-        if (validatedSchedule.endDate) {
-          validatedSchedule.endDate = new Date(validatedSchedule.endDate).toISOString();
-        }
-        if (validatedSchedule.repeatUntil) {
-          validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
-        }
-        if (typeof validatedSchedule.weeklyDays === "string") {
-          try {
-            validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays);
-          } catch (e) {
-            validatedSchedule.weeklyDays = [];
+ 
+          if (slides.length === 0) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to WebP images` });
           }
+ 
+          // Delete the original uploaded PDF (slides are now the source)
+          try { fs.unlinkSync(pdfPath); }
+          catch (e) { logger.log("error", `Failed to delete original PDF ${pdfPath}: ${e.message}`); }
+ 
+          mediaData.push(...slides);
+          console.log(`Added ${slides.length} WebP slides from PDF: ${file.originalname}`);
+          continue;
         }
-        if (!Array.isArray(validatedSchedule.weeklyDays)) {
-          validatedSchedule.weeklyDays = [];
+ 
+        // ── Blob upload (image / video) ────────────────────────────────────────
+        if (link && link.startsWith("blob:") && file) {
+          const contentPath = `/${username}/${Url_Name}/${file.filename}`;
+          mediaData.push({
+            content: contentPath,
+            time: parsedTime,
+            schedule: validatedSchedule,
+            fileName,
+            layout,
+            custom_ticker,
+            originalFormat: null,
+          });
+          continue;
+        }
+ 
+        // ── External URL ───────────────────────────────────────────────────────
+        if (link && !link.startsWith("blob:")) {
+          mediaData.push({
+            content: link,
+            time: parsedTime,
+            schedule: validatedSchedule,
+            fileName,
+            layout,
+            custom_ticker,
+            originalFormat: null,
+          });
         }
       }
-     
+ 
       console.log(`Final mediaData contains ${mediaData.length} items:`, mediaData);
-     
+ 
       const uniqueUrl = `${Url_Name}`;
       const newTickerData = await db.TickerData.create({
         user_id: userId,
@@ -570,7 +616,7 @@ router.post("/upload", licenseMiddleware, (req, res) => {
         Url_Name: Url_Name,
         custom_ticker: custom_ticker,
       });
-     
+ 
       broadcastUpdate(uniqueUrl, newTickerData.toJSON(), 'init');
       logger.logUserActivity(method, apiName, {
         user_id: userId,
@@ -578,12 +624,13 @@ router.post("/upload", licenseMiddleware, (req, res) => {
         previewUrl: `${baseURL}/${uniqueUrl}`,
         message: `URLs and files created successfully by User ${userId} for Account ${accountName}`,
       });
-     
+ 
       res.json({
         message: "URLs and files created successfully",
         previewUrl: `${baseURL}/${uniqueUrl}`,
-        totalSlides: mediaData.length
+        totalSlides: mediaData.length,
       });
+ 
     } catch (error) {
       console.error("Error saving data:", error);
       logger.log("error", `Error occurred: ${error.message}`);
@@ -591,387 +638,388 @@ router.post("/upload", licenseMiddleware, (req, res) => {
     }
   });
 });
-
+ 
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /updateUrlContent
+// ─────────────────────────────────────────────────────────────────────────────
 router.patch("/updateUrlContent", licenseMiddleware, async (req, res) => {
   console.log('licenseMiddleware called for:', req.method, req.originalUrl);
   upload(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === "LIMIT_FILE_SIZE") {
-        console.error("File size error:", err.message);
-        return res.status(400).json({
-          message: "File size exceeds the limit of 500MB. Please upload a smaller file.",
-        });
+        return res.status(400).json({ message: "File size exceeds the limit of 500MB. Please upload a smaller file." });
       }
     } else if (err) {
       if (err.code === "LIMIT_UNSUPPORTED_FILE_TYPE") {
-        console.error("Invalid file type error:", err.message);
-        return res.status(400).json({
-          message: err.message,
-        });
+        return res.status(400).json({ message: err.message });
       }
-      console.error("Unexpected error:", err.message);
-      return res.status(500).json({
-        message: "An unexpected error occurred while uploading the file.",
-      });
+      return res.status(500).json({ message: "An unexpected error occurred while uploading the file." });
     }
-   
+ 
     try {
       const token = req.headers.authorization;
-      if (!token) {
-        return res.status(401).json({ message: "Unauthorized: Token is missing" });
-      }
+      if (!token) return res.status(401).json({ message: "Unauthorized: Token is missing" });
+ 
       const decoded = jwt.verify(token, secret_key);
       const userId = decoded.userId;
-      const accountId = decoded.accountId || 1; // Fallback to 1 if not present
+      const accountId = decoded.accountId || 1;
+ 
       const user = await db.User.findOne({
         where: { id: userId },
         include: [{ model: db.Account, attributes: ['accountName'] }],
       });
-      if (!user || !user.Account) {
-        return res.status(400).json({ message: "User or account not found" });
-      }
+      if (!user || !user.Account) return res.status(400).json({ message: "User or account not found" });
+ 
       const accountName = user.Account.accountName;
-      username = user.username; // Set username here as well
+      username = user.username;
+ 
       const { id, Url_Name, custom_ticker } = req.body;
       const links = Array.isArray(req.body.links) ? req.body.links : [];
       const method = req.method;
       const apiName = req.originalUrl;
-     
-      if (!Url_Name || Url_Name.trim() === "") {
-        return res.status(400).json({ message: "Url_Name is required" });
-      }
-     
-      const reservedKeywords = [
-        "login",
-        "logout",
-        "admin",
-        "admin-dashboard",
-        "home",
-        "settings",
-        "register",
-        "editurl",
-      ];
-            
-      // Check for reserved keywords (case-insensitive)
+ 
+      if (!Url_Name || Url_Name.trim() === "") return res.status(400).json({ message: "Url_Name is required" });
+ 
+      const reservedKeywords = ["login", "logout", "admin", "admin-dashboard", "home", "settings", "register", "editurl"];
       if (reservedKeywords.includes(Url_Name.toLowerCase())) {
         return res.status(400).json({
           message: `The Url_Name "${Url_Name}" is reserved and cannot be used. Please choose a different name.`,
         });
       }
-      
-      // Check if the URL name already exists for the account
-      const existingUrl = await db.TickerData.findOne({
-        where: { Url_Name, account_id: accountId },
-      });
-      
-      if (existingUrl && existingUrl.id !== parseInt(id)) {  // Exclude self
+ 
+      const existingUrl = await db.TickerData.findOne({ where: { Url_Name, account_id: accountId } });
+      if (existingUrl && existingUrl.id !== parseInt(id)) {
         return res.status(400).json({
           message: `The Url_Name "${Url_Name}" is already taken for this account. Please choose a different name.`,
         });
       }
-          
+ 
       const mediaData = [];
       const validLayouts = ["single", "2x1", "1x2", "2x2", "3x1", "1x3"];
       const accountUploadDir = `./upload-service/uploads/${username}`;
-     
+      const flaskApiUrl = "http://127.0.0.1:5052/api/summarize";
+ 
       if (!id || !Array.isArray(links)) {
-        return res.status(400).json({
-          message: "Invalid request. Please provide a valid ID and links array.",
-        });
+        return res.status(400).json({ message: "Invalid request. Please provide a valid ID and links array." });
       }
-     
+ 
       const tickerData = await db.TickerData.findOne({ where: { id, account_id: accountId } });
-      if (!tickerData) {
-        return res.status(404).json({ message: "Record not found for this account" });
-      }
-     
-      // Track files to delete (only files that are being replaced)
+      if (!tickerData) return res.status(404).json({ message: "Record not found for this account" });
+ 
       const filesToDelete = new Set();
-     
-      // STEP 1: Collect groups to prune (for PPT replacement)
-      const groupsToPrune = new Set();  // groupIds to skip old slides
-     
-      // STEP 2: Convert files first (PPT, DOC, TXT)
-      const convertedFiles = new Map(); // Map original file index to converted files
-     
+      const groupsToPrune = new Set();
+      const convertedFiles = new Map(); // index → converted metadata
+ 
+      // ── STEP 1: Pre-convert all uploaded files ─────────────────────────────
       for (let i = 0; i < links.length; i++) {
         const linkObj = links[i];
-        const { link } = linkObj;
-        const replacePpt = linkObj.replacePpt === 'true';  // FormData strings
+        const { link, analyzeWithAI } = linkObj;
+        const replacePpt = linkObj.replacePpt === 'true';
         const originalGroupId = linkObj.originalGroupId || null;
         const file = req.files.find((f) => f.fieldname === `links[${i}][file]`);
-       
-        // If this is a new file upload (blob:), mark old file for deletion
+        const outputDir = path.join(accountUploadDir, Url_Name);
+ 
+        // Mark old file for deletion when a new blob replaces it
         if (file && link && link.startsWith("blob:")) {
           const existingContent = tickerData.url_content || [];
-          if (existingContent[i] && existingContent[i].content && existingContent[i].content.startsWith("/")) {
-            const oldFilePath = path.join(
-              accountUploadDir,
-              Url_Name,
-              existingContent[i].content.split("/").pop()
-            );
+          if (existingContent[i]?.content?.startsWith("/")) {
+            const oldFilePath = path.join(accountUploadDir, Url_Name, existingContent[i].content.split("/").pop());
             filesToDelete.add(oldFilePath);
-            console.log(`Marked for deletion: ${oldFilePath}`);
           }
         }
-       
-        // Handle PPT/PPTX conversion
+ 
+        if (!file) continue;
+ 
+        // PPT / PPTX
         if (
-          file &&
-          (file.mimetype === "application/vnd.ms-powerpoint" ||
-            file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+          file.mimetype === "application/vnd.ms-powerpoint" ||
+          file.mimetype === "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         ) {
-          console.log(`Processing PPT file for update: ${file.originalname}`);
           const originalPath = file.path;
-          const outputDir = path.join(accountUploadDir, Url_Name);
           const baseFileName = path.parse(file.originalname).name;
-          const newGroupId = uuidv4(); // New groupId for newly uploaded PPT
-         
+          const newGroupId = uuidv4();
+ 
           const slideImages = await convertPptToImages(originalPath, outputDir, baseFileName);
-         
           if (slideImages.length === 0) {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to slide images`,
-            });
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to slide images` });
           }
-         
-          console.log(`Converted ${file.originalname} to ${slideImages.length} slides`);
-         
-          // Store converted slides with groupId
+ 
           convertedFiles.set(i, {
             type: 'ppt',
-            slides: slideImages.map((slidePath, slideIndex) => ({
+            slides: slideImages.map((slidePath, idx) => ({
               filename: path.basename(slidePath),
               path: slidePath,
-              mimetype: 'image/png',
-              slideNumber: slideIndex,
+              slideNumber: idx,
               groupId: newGroupId,
             })),
             originalFormat: path.extname(file.originalname).toLowerCase().substring(1),
-            originalGroupId: originalGroupId  // Preserve for pruning
+            originalGroupId,
           });
-         
-          // If replacing, add old group to prune set
-          if (replacePpt && originalGroupId) {
-            groupsToPrune.add(originalGroupId);
-            console.log(`Marking group for prune on PPT replace: ${originalGroupId}`);
-          }
-         
-          // Delete original PPT file
-          try {
-            fs.unlinkSync(originalPath);
-            logger.log("info", `Deleted original PPT file: ${originalPath}`);
-          } catch (unlinkError) {
-            logger.log("error", `Failed to delete original PPT file ${originalPath}: ${unlinkError.message}`);
-          }
+ 
+          if (replacePpt && originalGroupId) groupsToPrune.add(originalGroupId);
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original PPT: ${e.message}`); }
+          continue;
         }
-        // Handle DOC/DOCX conversion
-        else if (
-          file &&
-          (file.mimetype === "application/msword" ||
-            file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+ 
+        // DOC / DOCX → PDF → WebP
+        if (
+          file.mimetype === "application/msword" ||
+          file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         ) {
           const originalPath = file.path;
           const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
-         
           const success = await convertDocToPdf(originalPath, pdfPath);
-         
-          if (success) {
-            const pdfFilename = path.basename(pdfPath);
-           
-            // Store converted PDF info
-            convertedFiles.set(i, {
-              type: 'doc',
-              filename: pdfFilename,
-              path: pdfPath,
-              mimetype: 'application/pdf',
-              originalFormat: path.extname(file.originalname).toLowerCase().substring(1)
-            });
-           
-            // Delete original DOC file
-            try {
-              fs.unlinkSync(originalPath);
-              logger.log("info", `Deleted original DOC file: ${originalPath}`);
-            } catch (unlinkError) {
-              logger.log("error", `Failed to delete original DOC file ${originalPath}: ${unlinkError.message}`);
-            }
-           
-            console.log(`Converted ${file.originalname} to ${pdfFilename}`);
-          } else {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to PDF`,
-            });
+ 
+          if (!success) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to PDF` });
           }
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original DOC: ${e.message}`); }
+ 
+          // WebP conversion happens in STEP 4 via buildWebPSlides
+          convertedFiles.set(i, {
+            type: 'doc',
+            pdfPath,
+            baseName: path.parse(file.originalname).name,
+            originalFormat: path.extname(file.originalname).toLowerCase().substring(1),
+          });
+          continue;
         }
-        // Handle TXT conversion
-        else if (file && file.mimetype === "text/plain") {
+ 
+        // TXT → PDF → WebP
+        if (file.mimetype === "text/plain") {
           const originalPath = file.path;
           const pdfPath = originalPath.substring(0, originalPath.lastIndexOf(".")) + ".pdf";
-         
           const success = await convertTxtToPdf(originalPath, pdfPath);
-         
-          if (success) {
-            const pdfFilename = path.basename(pdfPath);
-           
-            // Store converted PDF info
-            convertedFiles.set(i, {
-              type: 'txt',
-              filename: pdfFilename,
-              path: pdfPath,
-              mimetype: 'application/pdf',
-              originalFormat: 'txt'
-            });
-           
-            // Delete original TXT file
-            try {
-              fs.unlinkSync(originalPath);
-              logger.log("info", `Deleted original TXT file: ${originalPath}`);
-            } catch (unlinkError) {
-              logger.log("error", `Failed to delete original TXT file ${originalPath}: ${unlinkError.message}`);
-            }
-           
-            console.log(`Converted ${file.originalname} to ${pdfFilename}`);
-          } else {
-            return res.status(500).json({
-              message: `Failed to convert ${file.originalname} to PDF`,
-            });
+ 
+          if (!success) {
+            return res.status(500).json({ message: `Failed to convert ${file.originalname} to PDF` });
           }
+ 
+          try { fs.unlinkSync(originalPath); }
+          catch (e) { logger.log("error", `Failed to delete original TXT: ${e.message}`); }
+ 
+          convertedFiles.set(i, {
+            type: 'txt',
+            pdfPath,
+            baseName: path.parse(file.originalname).name,
+            originalFormat: 'txt',
+          });
+          continue;
+        }
+ 
+        // Direct PDF upload
+        if (file.mimetype === "application/pdf") {
+          // Store PDF path; branch on analyzeWithAI in STEP 4
+          convertedFiles.set(i, {
+            type: 'pdf',
+            pdfPath: file.path,
+            filename: file.filename,
+            baseName: path.parse(file.originalname).name,
+            analyzeWithAI: linkObj.analyzeWithAI,
+          });
         }
       }
-     
-      // STEP 3: Delete only the files that are being replaced
+ 
+      // ── STEP 2: Delete replaced files ─────────────────────────────────────
       for (const filePath of filesToDelete) {
         if (fs.existsSync(filePath)) {
-          try {
-            fs.unlinkSync(filePath);
-            console.log(`Deleted old file: ${filePath}`);
-          } catch (unlinkErr) {
-            console.error(`Failed to delete ${filePath}:`, unlinkErr.message);
-          }
+          try { fs.unlinkSync(filePath); }
+          catch (e) { console.error(`Failed to delete ${filePath}:`, e.message); }
         }
       }
-     
-      // STEP 4: Build mediaData array
+ 
+      // ── STEP 3: Build mediaData ────────────────────────────────────────────
       for (let i = 0; i < links.length; i++) {
         const {
           link,
           time,
           layout,
           schedule = {},
-          analyzeWithAI,
           fileName,
           custom_ticker,
-          groupId: requestGroupId,  // Rename to avoid conflict
+          groupId: requestGroupId,
           originalGroupId,
           replacePpt,
         } = links[i];
-       
-        let contentPath = link;
+ 
         const parsedTime = parseInt(time, 10);
-       
         if (!parsedTime || isNaN(parsedTime) || parsedTime <= 0) {
           return res.status(400).json({ message: `Please enter a valid time for item ${i + 1}` });
         }
         if (!link || link.trim() === "") {
-          return res.status(400).json({
-            message: `Please enter valid content for item ${i + 1}`,
-          });
+          return res.status(400).json({ message: `Please enter valid content for item ${i + 1}` });
         }
         if (layout && !validLayouts.includes(layout)) {
           return res.status(400).json({
             message: `Invalid layout value for item ${i + 1}. Allowed values are: ${validLayouts.join(", ")}`,
           });
         }
-       
-        // Validate and normalize schedule
+ 
         const validatedSchedule = { ...schedule };
-        if (validatedSchedule.startDate) {
-          validatedSchedule.startDate = new Date(validatedSchedule.startDate).toISOString();
-        }
-        if (validatedSchedule.endDate) {
-          validatedSchedule.endDate = new Date(validatedSchedule.endDate).toISOString();
-        }
-        if (validatedSchedule.repeatUntil) {
-          validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
-        }
+        if (validatedSchedule.startDate)   validatedSchedule.startDate   = new Date(validatedSchedule.startDate).toISOString();
+        if (validatedSchedule.endDate)     validatedSchedule.endDate     = new Date(validatedSchedule.endDate).toISOString();
+        if (validatedSchedule.repeatUntil) validatedSchedule.repeatUntil = new Date(validatedSchedule.repeatUntil).toISOString();
         if (typeof validatedSchedule.weeklyDays === "string") {
-          try {
-            validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays);
-          } catch (e) {
-            validatedSchedule.weeklyDays = [];
-          }
+          try { validatedSchedule.weeklyDays = JSON.parse(validatedSchedule.weeklyDays); }
+          catch (e) { validatedSchedule.weeklyDays = []; }
         }
-        if (!Array.isArray(validatedSchedule.weeklyDays)) {
-          validatedSchedule.weeklyDays = [];
-        }
-       
-        // Check if this link has converted files
+        if (!Array.isArray(validatedSchedule.weeklyDays)) validatedSchedule.weeklyDays = [];
+ 
+        const outputDir = path.join(accountUploadDir, Url_Name);
         const converted = convertedFiles.get(i);
         const effectiveGroupId = requestGroupId || null;
-       
+ 
         if (converted && link && link.startsWith("blob:")) {
+ 
+          // ── PPT slides ────────────────────────────────────────────────────
           if (converted.type === 'ppt') {
-            // Add all slides
-            console.log(`Adding ${converted.slides.length} slides to mediaData for link ${i}`);
             for (const slide of converted.slides) {
-              contentPath = `/${username}/${Url_Name}/${slide.filename}`;
               mediaData.push({
-                content: contentPath,
+                content: `/${username}/${Url_Name}/${slide.filename}`,
                 time: parsedTime,
                 schedule: validatedSchedule,
                 fileName: slide.filename,
                 layout: "single",
                 custom_ticker,
                 originalFormat: converted.originalFormat,
-                groupId: slide.groupId,  // Use the new groupId for new PPT
+                groupId: slide.groupId,
                 slideNumber: slide.slideNumber,
               });
-              console.log(`Added slide to mediaData: ${slide.filename}`);
             }
-          } else {
-            // Add converted PDF (from DOC or TXT)
-            contentPath = `/${username}/${Url_Name}/${converted.filename}`;
-            mediaData.push({
-              content: contentPath,
-              time: parsedTime,
+            continue;
+          }
+ 
+          // ── DOC / TXT → WebP slides ───────────────────────────────────────
+          if (converted.type === 'doc' || converted.type === 'txt') {
+            const slides = await buildWebPSlides({
+              pdfPath: converted.pdfPath,
+              outputDir,
+              baseName: converted.baseName,
+              parsedTime,
               schedule: validatedSchedule,
-              fileName: converted.filename, // Use PDF filename, not original
               layout,
               custom_ticker,
               originalFormat: converted.originalFormat,
-              groupId: effectiveGroupId,
+              username,
+              Url_Name,
             });
-            console.log(`Added converted file to mediaData: ${converted.filename}`);
+ 
+            if (slides.length === 0) {
+              return res.status(500).json({ message: `Failed to convert file to WebP images (index ${i})` });
+            }
+ 
+            mediaData.push(...slides);
+            console.log(`Added ${slides.length} WebP slides from ${converted.type.toUpperCase()}`);
+            continue;
           }
-        } else if (link && link.startsWith("blob:")) {
-          // Regular file upload (image, video, PDF) - this handles individual slide replacement
+ 
+          // ── Direct PDF ────────────────────────────────────────────────────
+          if (converted.type === 'pdf') {
+            // Branch A: AI summarisation
+            if (converted.analyzeWithAI === "true") {
+              try {
+                const pdfBuffer = fs.readFileSync(converted.pdfPath);
+                const base64Pdf = pdfBuffer.toString("base64");
+                const response = await axios.post(
+                  flaskApiUrl,
+                  { pdf: base64Pdf, filename: converted.filename },
+                  { headers: { "Content-Type": "application/json" } }
+                );
+ 
+                if (response.data && response.data.summary) {
+                  mediaData.push({
+                    content: `/${username}/${Url_Name}/${converted.filename}`,
+                    time: parsedTime,
+                    summary: response.data.summary,
+                    schedule: validatedSchedule,
+                    fileName: converted.filename,
+                    layout,
+                    custom_ticker,
+                    originalFormat: null,
+                    groupId: effectiveGroupId,
+                  });
+                  continue;
+                }
+              } catch (flaskError) {
+                console.error("Failed to summarize PDF:", flaskError);
+                // Fall through to WebP conversion
+              }
+            }
+ 
+            // Branch B: Convert to WebP slides
+            const slides = await buildWebPSlides({
+              pdfPath: converted.pdfPath,
+              outputDir,
+              baseName: converted.baseName,
+              parsedTime,
+              schedule: validatedSchedule,
+              layout,
+              custom_ticker,
+              originalFormat: 'pdf',
+              username,
+              Url_Name,
+            });
+ 
+            if (slides.length === 0) {
+              return res.status(500).json({ message: `Failed to convert PDF to WebP images (index ${i})` });
+            }
+ 
+            // Remove the originally uploaded PDF file
+            try { fs.unlinkSync(converted.pdfPath); }
+            catch (e) { logger.log("error", `Failed to delete uploaded PDF: ${e.message}`); }
+ 
+            mediaData.push(...slides);
+            console.log(`Added ${slides.length} WebP slides from PDF`);
+            continue;
+          }
+ 
+          // ── Regular blob (image / video) ──────────────────────────────────
           const file = req.files.find((f) => f.fieldname === `links[${i}][file]`);
           if (file) {
-            contentPath = `/${username}/${Url_Name}/${file.filename}`;
             mediaData.push({
-              content: contentPath,
+              content: `/${username}/${Url_Name}/${file.filename}`,
               time: parsedTime,
               schedule: validatedSchedule,
               fileName: file.filename,
               layout,
               custom_ticker,
               originalFormat: null,
-              groupId: effectiveGroupId,  // Preserve groupId for individual replacements
+              groupId: effectiveGroupId,
             });
           }
+ 
+        } else if (link && link.startsWith("blob:")) {
+          // Blob with no conversion (plain image/video)
+          const file = req.files.find((f) => f.fieldname === `links[${i}][file]`);
+          if (file) {
+            mediaData.push({
+              content: `/${username}/${Url_Name}/${file.filename}`,
+              time: parsedTime,
+              schedule: validatedSchedule,
+              fileName: file.filename,
+              layout,
+              custom_ticker,
+              originalFormat: null,
+              groupId: effectiveGroupId,
+            });
+          }
+ 
         } else if (link && !link.startsWith("blob:")) {
-          // Existing content (preserve original groupId)
-          contentPath = link;
-          // For existing items, check if it had a groupId in the original data
+          // Existing / external content — preserve groupId
           const existingItem = tickerData.url_content.find(item => item.content === link);
           const preservedGroupId = existingItem ? existingItem.groupId : effectiveGroupId;
-          // Skip if this is an old slide in a pruned group
+ 
           if (groupsToPrune.has(preservedGroupId)) {
-            console.log(`Skipping old slide in pruned group: ${link} (groupId: ${preservedGroupId})`);
-            continue;  // Skip adding to mediaData
+            console.log(`Skipping old slide in pruned group: ${link}`);
+            continue;
           }
+ 
           mediaData.push({
-            content: contentPath,
+            content: link,
             time: parsedTime,
             schedule: validatedSchedule,
             fileName,
@@ -982,68 +1030,59 @@ router.patch("/updateUrlContent", licenseMiddleware, async (req, res) => {
           });
         }
       }
-     
-      // Clean up unused local files from previous content
+ 
+      // ── STEP 4: Delete unused local files ─────────────────────────────────
       const oldUrlContent = tickerData.url_content || [];
-      const oldLocalFiles = oldUrlContent
-        .filter(c => c.content && c.content.startsWith('/'))
-        .map(c => path.basename(c.content));
-      const newLocalFiles = mediaData
-        .filter(m => m.content && m.content.startsWith('/'))
-        .map(m => path.basename(m.content));
+      const oldLocalFiles = oldUrlContent.filter(c => c.content?.startsWith('/')).map(c => path.basename(c.content));
+      const newLocalFiles = mediaData.filter(m => m.content?.startsWith('/')).map(m => path.basename(m.content));
       const unusedFiles = oldLocalFiles.filter(f => !newLocalFiles.includes(f));
+ 
       for (const filename of unusedFiles) {
         const filePath = path.join(accountUploadDir, Url_Name, filename);
         if (fs.existsSync(filePath)) {
-          console.log(`Deleting unused file: ${filePath}`);  // Enhanced logging
-          try {
-            fs.unlinkSync(filePath);
-          } catch (err) {
-            console.error(`Failed to delete unused file ${filePath}:`, err);
-          }
+          try { fs.unlinkSync(filePath); }
+          catch (e) { console.error(`Failed to delete unused file ${filePath}:`, e); }
         }
       }
-     
-      console.log(`Final mediaData for update contains ${mediaData.length} items`);
-      console.log(`Pruned ${groupsToPrune.size} PPT groups to avoid duplicates`);
-     
+ 
+      console.log(`Final mediaData for update: ${mediaData.length} items`);
+      console.log(`Pruned ${groupsToPrune.size} PPT groups`);
+ 
       await tickerData.update({
         url_content: mediaData,
         Url_Name: req.body.Url_Name,
         url: req.body.Url_Name,
         custom_ticker: custom_ticker || "",
       });
-     
+ 
       const previewUrl = `${baseURL}/${tickerData.url}`;
       broadcastUpdate(Url_Name, tickerData.toJSON());
-     
+ 
       logger.logUserActivity(method, apiName, {
         user_id: userId,
         account_id: accountId,
-        previewUrl: previewUrl,
+        previewUrl,
         message: `URLs Updated successfully By User ${userId} for Account ${accountName}`,
         Updated_id: `${tickerData.id}`,
       });
-     
+ 
       res.json({
         message: "URL content updated successfully",
         data: {
           id: tickerData.id,
           user_id: tickerData.user_id,
           account_id: tickerData.account_id,
-          url_content: mediaData,  // Return the new mediaData to frontend
+          url_content: mediaData,
           custom_ticker: tickerData.custom_ticker,
           previewUrl,
           totalSlides: mediaData.length,
         },
       });
+ 
     } catch (error) {
       console.error("Error updating URL content:", error.message);
       logger.log("error", `Error occurred: ${error.message}`);
-      res.status(500).json({
-        message: "Failed to update URL content",
-        error: error.message,
-      });
+      res.status(500).json({ message: "Failed to update URL content", error: error.message });
     }
   });
 });
