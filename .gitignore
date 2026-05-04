@@ -133,3 +133,4 @@ Server_test/ticker_db.sqlite
 /Automation
 *.sqlite
 Server_test/ticker_db.sqlite
+Server_test/config/ipAddress.js

@@ -3,16 +3,36 @@ import Header from "./Header";
 import axios from "axios";
 import { jwtDecode } from "jwt-decode";
 import Swal from "sweetalert2";
-import { useSettings } from "./SettingsContext";
+
+// Define available RSS feed providers
+const rssFeedOptions = [
+  // 🌍 International
+  { value: "cnn", label: "CNN", url: "https://rss.cnn.com/rss/edition.rss" },
+  { value: "nbc", label: "NBC News", url: "https://feeds.nbcnews.com/nbcnews/public/news" },
+  { value: "nytimes", label: "The New York Times", url: "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml" },
+  { value: "bbc", label: "BBC News", url: "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml" },
+  { value: "fox", label: "Fox News", url: "https://feeds.foxnews.com/foxnews/latest" },
+
+  // 🇮🇳 Indian Top Media
+  { value: "ndtv", label: "NDTV", url: "https://feeds.feedburner.com/ndtvnews-top-stories" },
+  { value: "indiatoday", label: "India Today", url: "https://www.indiatoday.in/rss/1206514" },
+  { value: "indiatv", label: "India TV News", url: "https://www.indiatvnews.com/rssfeed/topstory.xml" },
+  { value: "zeenews", label: "Zee News", url: "https://zeenews.india.com/rss/india-national-news.xml" },
+  { value: "dna", label: "DNA India", url: "https://www.dnaindia.com/feeds/india.xml" },
+
+  // 💼 Business & Finance
+  { value: "moneycontrol", label: "Moneycontrol", url: "https://www.moneycontrol.com/rss/latestnews.xml" },
+];
 
 
-// Default settings remain unchanged
+// Default settings with RSS feed provider
 const defaultSettings = {
   ticker: {
     speed: 500,
-    height: 48,
+    height: 50,
     fontSize: 16,
     visible: true,
+    rssFeed: "nbc", // Default RSS feed provider
   },
   dateTime: {
     position: "top-right",
@@ -23,8 +43,6 @@ const defaultSettings = {
     visible: true,
   },
 };
-
-// const { settings, setSettings } = useSettings();
 
 const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
 
@@ -38,7 +56,7 @@ const Settings = ({ onApplySettings }) => {
 
   const token = localStorage.getItem("token");
 
-  // Fetch existing URLs (unchanged)
+  // Fetch existing URLs
   useEffect(() => {
     const fetchExistingUrls = async () => {
       let userId;
@@ -73,7 +91,7 @@ const Settings = ({ onApplySettings }) => {
     fetchExistingUrls();
   }, [token]);
 
-  // Fetch settings for selected URL (unchanged)
+  // Fetch settings for selected URL
   useEffect(() => {
     const fetchSettings = async () => {
       if (!selectedUrl) {
@@ -163,16 +181,14 @@ const Settings = ({ onApplySettings }) => {
     });
   };
 
-
-
   return (
     <>
-       <div className="fixed top-0 left-0 right-0 z-50">
-    <Header />
-  </div>
+      <div className="fixed top-0 left-0 right-0 z-50">
+        <Header />
+      </div>
 
-  <div className="pt-20 min-h-screen bg-gray-100 flex justify-center items-start py-12 px-4 sm:px-6 lg:px-8 overflow-y-auto">
-   <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-8 transition-all duration-300">
+      <div className="pt-20 min-h-screen bg-gray-100 flex justify-center items-start py-12 px-4 sm:px-6 lg:px-8 overflow-y-auto">
+        <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-8 transition-all duration-300">
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-8">
             Customize Display Settings
           </h2>
@@ -247,6 +263,24 @@ const Settings = ({ onApplySettings }) => {
               </span>
             </h3>
             <div className="space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  RSS Feed Provider
+                </label>
+                <select
+                  value={settings.ticker.rssFeed}
+                  onChange={(e) => handleChange("ticker", "rssFeed", e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all disabled:opacity-50"
+                  disabled={urls.length === 0}
+                  aria-label="RSS feed provider"
+                >
+                  {rssFeedOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Speed (milliseconds)

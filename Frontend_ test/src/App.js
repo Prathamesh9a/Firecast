@@ -22,7 +22,7 @@ function App() {
           <Route path="/home" element={<Home1 />} />
           <Route path="/editUrl" element={<ExistingURL />} />
           <Route path="/admin" element={<AdminPage />} />
-          <Route path="/register" element={<Register />} />
+          {/* <Route path="/register" element={<Register />} /> */}
           <Route path="/login" element={<Login />} />
           <Route path="/logout" element={<Logout />} />
           <Route path="/:url" element={<Preview />} />
@@ -37,7 +37,7 @@ function App() {
 
 export default App;
 
-//8879541671
+//
 // import React, { useState } from 'react';
 // import { BrowserRouter as Routes, Route, Link, useNavigate } from 'react-router-dom';
 // import Register from './Pages/Register';

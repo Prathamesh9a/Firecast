@@ -2,10 +2,10 @@ module.exports = (sequelize, DataTypes) => {
   const TickerData = sequelize.define('ticker_data', {
     user_id: {
       type: DataTypes.INTEGER,
-      allowNull: false, // Ensure user_id cannot be null
+      allowNull: false,
       references: {
-        model: 'users', // Name of the target table (users)
-        key: 'id',      // Key in the User table that TickerData will reference
+        model: 'users',
+        key: 'id',
       },
     },
     url_content: {
@@ -19,24 +19,23 @@ module.exports = (sequelize, DataTypes) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
-    isEnabled:
-    {
+    isEnabled: {
       type: DataTypes.BOOLEAN,
       allowNull: true,
     },
     scheduledAt: {
       type: DataTypes.DATE,
-      allowNull: true
+      allowNull: true,
     },
     expiresAt: {
       type: DataTypes.DATE,
-      allowNull: true
+      allowNull: true,
     },
     custom_ticker: {
       type: DataTypes.STRING,
-      allowNull: true
+      allowNull: true,
     },
-    settings: { // New column to store settings
+    settings: {
       type: DataTypes.JSON,
       allowNull: true,
       defaultValue: {
@@ -45,6 +44,7 @@ module.exports = (sequelize, DataTypes) => {
           height: 50,
           fontSize: 16,
           visible: true,
+          rssFeed: ["nbc"], // Default RSS feed
         },
         dateTime: {
           position: "top-right",
@@ -56,9 +56,12 @@ module.exports = (sequelize, DataTypes) => {
         },
       },
     },
+    account_id: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
   });
 
-  // Associate the TickerData model with the User model
   TickerData.associate = (models) => {
     TickerData.belongsTo(models.User, { foreignKey: 'user_id' });
   };
