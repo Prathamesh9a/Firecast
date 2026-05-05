@@ -287,8 +287,8 @@ const Settings = ({ onApplySettings }) => {
                 </label>
                 <input
                   type="range"
-                  min="100"
-                  max="600"
+                  min="10"
+                  max="1200"
                   value={settings.ticker.speed}
                   onChange={(e) => handleChange("ticker", "speed", parseInt(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"
@@ -303,8 +303,8 @@ const Settings = ({ onApplySettings }) => {
                 </label>
                 <input
                   type="range"
-                  min="50"
-                  max="80"
+                  min="5"
+                  max="300"
                   value={settings.ticker.height}
                   onChange={(e) => handleChange("ticker", "height", parseInt(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"
@@ -319,8 +319,8 @@ const Settings = ({ onApplySettings }) => {
                 </label>
                 <input
                   type="range"
-                  min="14"
-                  max="26"
+                  min="2"
+                  max="158"
                   value={settings.ticker.fontSize}
                   onChange={(e) => handleChange("ticker", "fontSize", parseInt(e.target.value))}
                   className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600 disabled:opacity-50"

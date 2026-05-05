@@ -1394,17 +1394,17 @@ router.post("/saveSettings", async (req, res) => {
       return res.status(400).json({ message: "Invalid temperature position" });
     }
     if (settings.ticker) {
-      if (settings.ticker.speed < 100 || settings.ticker.speed > 600) {
+      if (settings.ticker.speed < 10 || settings.ticker.speed > 1200) {
         return res
           .status(400)
           .json({ message: "Ticker speed must be between 100 and 600 milliseconds" });
       }
-      if (settings.ticker.height < 50 || settings.ticker.height > 80) {
+      if (settings.ticker.height < 5 || settings.ticker.height > 300) {
         return res
           .status(400)
           .json({ message: "Ticker height must be between 50 and 80 pixels" });
       }
-      if (settings.ticker.fontSize < 14 || settings.ticker.fontSize > 26) {
+      if (settings.ticker.fontSize < 2 || settings.ticker.fontSize > 158) {
         return res.status(400).json({
           message: "Ticker font size must be between 14 and 26 pixels",
         });

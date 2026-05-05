@@ -811,7 +811,7 @@ const MediaItem = React.memo(
               <img
                 src={contentUrl}
                 alt="Slide"
-                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`}
+                className={`w-full h-full object-cover ${isLoading ? "opacity-0" : "opacity-100"}`}
                 style={{ transition: "opacity 0.3s ease" }}
                 loading="eager"
                 onLoad={() => setIsLoading(false)}
@@ -848,7 +848,7 @@ const MediaItem = React.memo(
         <div ref={ref} className="w-full h-full relative">
           {inView ? (
             <>
-              <video ref={videoRef} autoPlay={!isPaused} muted className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`} style={{ transition: "opacity 0.3s ease" }}>
+              <video ref={videoRef} autoPlay={!isPaused} muted className={`w-full h-full object-cover ${isLoading ? "opacity-0" : "opacity-100"}`} style={{ transition: "opacity 0.3s ease" }}>
                 <source src={videoSrc} type={videoSrc.toLowerCase().endsWith(".mp4") ? "video/mp4" : isMov ? "video/quicktime" : "video/webm"} />
                 Your browser does not support the video tag.
               </video>
@@ -908,7 +908,7 @@ const MediaItem = React.memo(
               <img
                 src={contentUrl}
                 alt="Preview content"
-                className={`w-full h-full object-contain ${isLoading ? "opacity-0" : "opacity-100"}`}
+                className={`w-full h-full object-cover ${isLoading ? "opacity-0" : "opacity-100"}`}
                 loading="lazy"
                 style={{ transition: "opacity 0.3s ease" }}
                 onLoad={() => setIsLoading(false)}
@@ -1510,26 +1510,50 @@ const Preview = () => {
       <TemperatureDisplay weather={weather} position={settings.temperature.position} visible={settings.temperature.visible} />
 
       {(customTicker || news.length > 0) && settings.ticker.visible && (
-        <div className="absolute bottom-16 left-0 w-full overflow-hidden bg-black bg-opacity-70 py-3" style={{ height: `${settings.ticker.height}px` }}>
-          <div className="news-ticker-container relative w-full">
+        <div
+          className="absolute bottom-50 left-0 w-full overflow-hidden bg-[#083D77]"
+          style={{ height: `${settings.ticker.height }px` }}
+        >
+          <div className="relative w-full h-full flex items-center overflow-hidden">
             <div
               key={`ticker-${settings.ticker.speed}-${settings.ticker.fontSize}`}
-              className="news-ticker"
               style={{
-                animationName: "marquee",
-                animationDuration: `${customTicker ? settings.ticker.speed * 0.5 : settings.ticker.speed}s`,
-                animationTimingFunction: "linear",
-                animationIterationCount: "infinite",
-                fontSize: `${settings.ticker.fontSize}px`,
+                display: 'inline-block',
+                whiteSpace: 'nowrap',
+                animationName: 'marquee',
+                animationDuration: `${customTicker
+                  ? Math.max(settings.ticker.speed , 10)
+                  : settings.ticker.speed}s`,
+                animationTimingFunction: 'linear',
+                animationIterationCount: 'infinite',
+                fontSize: `${settings.ticker.fontSize }px`,
+                willChange: 'transform',
               }}
             >
               {customTicker ? (
-                <span className="news-item inline-block px-6 text-white">{customTicker}</span>
+                <>
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <span
+                      key={`custom-${i}`}
+                      className="inline-block text-white"
+                      style={{ paddingLeft: '12vw', paddingRight: '12vw' }}
+                    >
+                      {customTicker}
+                    </span>
+                  ))}
+                </>
               ) : (
                 <>
                   {[...news, ...news].map((article, index) => (
-                    <span key={`news-${index}`} className="news-item inline-block px-6 text-white">
-                      <strong>{article.title}</strong> — {formatDescription(article.description)}
+                    <span
+                      key={`news-${index}`}
+                      className="inline-block text-white"
+                      style={{ paddingLeft: '3vw', paddingRight: '3vw' }}
+                    >
+                      <strong>{article.title}</strong>
+                      {article.description && (
+                        <> — {formatDescription(article.description)}</>
+                      )}
                     </span>
                   ))}
                 </>
